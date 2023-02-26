@@ -18,12 +18,16 @@ edition = "2021"
 
 [dependencies]
 apollo-parser = { path = "../apollo-parser", version = "0.5.0" }
+apollo-encoder = { path = "../apollo-encoder", version = "0.5.0" }
 ariadne = { package = "apollo-ariadne", version = "0.2.0-alpha.0" }
 indexmap = "1.9.2"
 rowan = "0.15.5"
 salsa = "0.16.1"
 ordered-float = { version = "2.10.0", features = ["std"] }
 thiserror = "1.0.31"
+
+# [features] 
+# encode_hir = ["apollo-encoder"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { version = "1.1", features = ["serde", "v4", "js"] }

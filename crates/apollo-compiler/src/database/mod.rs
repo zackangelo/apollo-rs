@@ -3,6 +3,7 @@ pub mod hir;
 
 mod ast;
 mod document;
+mod encode;
 mod hir_db;
 mod inputs;
 mod sources;
