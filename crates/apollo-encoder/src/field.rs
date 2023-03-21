@@ -141,6 +141,11 @@ impl Field {
         }
     }
 
+    /// Gets the name of this field
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     /// Set an alias to a field name
     pub fn alias(&mut self, alias: Option<String>) {
         self.alias = alias;
@@ -151,6 +156,11 @@ impl Field {
         self.directives.push(directive);
     }
 
+    /// Gets a mutable reference to directives
+    pub fn directives_mut(&mut self) -> &mut Vec<Directive> {
+        &mut self.directives
+    }
+
     /// Add an argument to a field
     pub fn argument(&mut self, argument: Argument) {
         self.args.push(argument);
@@ -159,6 +169,16 @@ impl Field {
     /// Set a selection set to a field
     pub fn selection_set(&mut self, selection_set: Option<SelectionSet>) {
         self.selection_set = selection_set;
+    }
+
+    /// Gets the selection set
+    pub fn get_selection_set(&self) -> &Option<SelectionSet> {
+        &self.selection_set
+    }
+
+    /// Gets a mutable reference to selection set
+    pub fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
+        self.selection_set.as_mut()
     }
 
     /// Should be used everywhere in this crate instead of the Display implementation

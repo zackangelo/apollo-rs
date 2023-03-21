@@ -55,6 +55,11 @@ impl SelectionSet {
         self.selections.push(selection);
     }
 
+    /// Gets a mutable reference to selections
+    pub fn selections_mut(&mut self) -> &mut Vec<Selection> {
+        &mut self.selections
+    }
+
     /// Should be used everywhere in this crate isntead of the Display implementation
     /// Display implementation is only useful as a public api
     pub(crate) fn format_with_indent(&self, mut indent_level: usize) -> String {

@@ -37,6 +37,11 @@ impl Directive {
     pub fn arg(&mut self, arg: Argument) {
         self.args.push(arg);
     }
+
+    /// Gets the name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
 }
 
 impl fmt::Display for Directive {

@@ -171,6 +171,11 @@ impl InlineFragment {
         }
     }
 
+    /// Sets the selection set
+    pub fn selection_set(&mut self, selection_set: SelectionSet) -> () {
+        self.selection_set = selection_set;
+    }
+
     /// Add a directive.
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive)
@@ -179,6 +184,11 @@ impl InlineFragment {
     /// Set the inline fragment's type condition.
     pub fn type_condition(&mut self, type_condition: Option<TypeCondition>) {
         self.type_condition = type_condition;
+    }
+
+    /// Gets the type condition
+    pub fn get_type_condition(&self) -> &Option<TypeCondition> {
+        &self.type_condition
     }
 
     /// Should be used everywhere in this crate isntead of the Display implementation
@@ -227,6 +237,11 @@ impl TypeCondition {
     /// Create an instance of TypeCondition
     pub fn new(name: String) -> Self {
         Self { name }
+    }
+
+    /// Gets the name
+    pub fn get_name(&self) -> &str {
+        &self.name
     }
 }
 

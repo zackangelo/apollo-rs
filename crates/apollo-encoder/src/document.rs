@@ -140,6 +140,16 @@ impl Document {
     pub fn directive(&mut self, directive_definition: DirectiveDefinition) {
         self.directive_definitions.push(directive_definition);
     }
+
+    /// Return mutable reference to object definitions
+    pub fn object_definitions_mut(&mut self) -> &mut Vec<ObjectDefinition> {
+        &mut self.object_type_definitions
+    }
+
+    /// Return mutable reference to interface definitions
+    pub fn interface_definitions_mut(&mut self) -> &mut Vec<InterfaceDefinition> {
+        &mut self.interface_type_definitions
+    }
 }
 
 impl fmt::Display for Document {
