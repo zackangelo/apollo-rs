@@ -1104,8 +1104,15 @@ impl Field {
 
     /// Get field's original field definition.
     pub fn field_definition(&self, db: &dyn HirDatabase) -> Option<FieldDefinition> {
-        db.find_object_type_by_name(self.parent_obj.as_ref()?.to_string())?
-            .fields_definition()
+        let type_name = self.parent_obj.as_ref()?.to_string();
+        let type_def = db.find_type_definition_by_name(type_name)?;
+        let field_defs = match type_def {
+            TypeDefinition::ObjectTypeDefinition(ref obj) => Some(obj.fields_definition()),
+            TypeDefinition::InterfaceTypeDefinition(ref iface) => Some(iface.fields_definition()),
+            _ => None,
+        }?;
+
+        field_defs
             .iter()
             .find(|field| field.name() == self.name())
             .cloned()

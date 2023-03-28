@@ -13,6 +13,7 @@ pub(crate) fn types_definitions_by_name(
         // Panics in `ApolloCompiler` methods ensure `type_definition_files().is_empty()`
         return precomputed.type_definitions_by_name.clone();
     }
+
     let mut map = IndexMap::new();
     macro_rules! add {
         ($get: ident, $variant: ident) => {
