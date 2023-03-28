@@ -24,15 +24,17 @@ pub fn validate_object_type_definition(
 ) -> Vec<ApolloDiagnostic> {
     let mut diagnostics = Vec::new();
 
-    diagnostics.extend(
-        db.validate_directives(object.directives().to_vec(), hir::DirectiveLocation::Object),
-    );
+    diagnostics.extend(db.validate_directives(
+        object.directives().cloned().collect(),
+        hir::DirectiveLocation::Object,
+    ));
 
     // Object Type field validations.
-    diagnostics.extend(db.validate_field_definitions(object.fields_definition().to_vec()));
+    diagnostics.extend(db.validate_field_definitions(object.self_fields().to_vec()));
 
     // Implements Interfaces validation.
-    diagnostics.extend(db.validate_implements_interfaces(object.implements_interfaces().to_vec()));
+    diagnostics
+        .extend(db.validate_implements_interfaces(object.self_implements_interfaces().to_vec()));
 
     // When defining an interface that implements another interface, the
     // implementing interface must define each field that is specified by
@@ -40,17 +42,17 @@ pub fn validate_object_type_definition(
     //
     // Returns a Missing Field error.
     let fields: HashSet<ValidationSet> = object
-        .fields_definition()
+        .self_fields()
         .iter()
         .map(|field| ValidationSet {
             name: field.name().into(),
             loc: field.loc(),
         })
         .collect();
-    for implements_interface in object.implements_interfaces().iter() {
+    for implements_interface in object.self_implements_interfaces().iter() {
         if let Some(interface) = implements_interface.interface_definition(db.upcast()) {
             let implements_interface_fields: HashSet<ValidationSet> = interface
-                .fields_definition()
+                .self_fields()
                 .iter()
                 .map(|field| ValidationSet {
                     name: field.name().into(),
@@ -62,26 +64,25 @@ pub fn validate_object_type_definition(
 
             for missing_field in field_diff {
                 let name = &missing_field.name;
-                diagnostics.push(
-                    ApolloDiagnostic::new(
-                        db,
-                        object.loc().into(),
-                        DiagnosticData::MissingField {
-                            field: name.to_string(),
-                        },
-                        )
-                    .labels([
-                            Label::new(
-                                missing_field.loc,
-                                format!("`{name}` was originally defined here"),
-                                ),
-                                Label::new(
-                                    object.loc(),
-                                    format!("add `{name}` field to this object"),
-                                    ),
-                    ])
-                    .help("An object must provide all fields required by the interfaces it implements"),
-                    )
+                let mut labels = vec![Label::new(
+                    object.loc(),
+                    format!("add `{name}` field to this object"),
+                )];
+                if let Some(loc) = missing_field.loc {
+                    labels.push(Label::new(
+                        loc,
+                        format!("`{name}` was originally defined here"),
+                    ));
+                };
+                diagnostics.push(ApolloDiagnostic::new(
+                    db,
+                    object.loc().into(),
+                    DiagnosticData::MissingField {
+                        field: name.to_string(),
+                    },
+                )
+                .labels(labels)
+                .help("An object must provide all fields required by the interfaces it implements"))
             }
         }
     }
@@ -98,8 +99,14 @@ mod test {
         let input = r#"
 query mainPage {
   width
-  result
-  entity
+  result {
+    ... on Person {
+      name
+    }
+  }
+  entity {
+    name
+  }
 }
 
 type Query {

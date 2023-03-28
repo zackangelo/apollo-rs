@@ -12,9 +12,10 @@ pub fn validate_interface_definitions(db: &dyn ValidationDatabase) -> Vec<Apollo
 
     let defs = &db.type_system_definitions().interfaces;
     for def in defs.values() {
-        diagnostics.extend(
-            db.validate_directives(def.directives().to_vec(), hir::DirectiveLocation::Interface),
-        );
+        diagnostics.extend(db.validate_directives(
+            def.directives().cloned().collect(),
+            hir::DirectiveLocation::Interface,
+        ));
         diagnostics.extend(db.validate_interface_definition(def.clone()));
     }
 
@@ -43,7 +44,7 @@ pub fn validate_interface_definition(
     //   name: String
     // }
     for (name, interface_def) in db.interfaces().iter() {
-        for implements_interface in interface_def.implements_interfaces() {
+        for implements_interface in interface_def.self_implements_interfaces() {
             if let Some(interface) = implements_interface.interface_definition(db.upcast()) {
                 let super_name = interface.name();
                 if name == super_name {
@@ -66,11 +67,12 @@ pub fn validate_interface_definition(
     }
 
     // Interface Type field validation.
-    diagnostics.extend(db.validate_field_definitions(interface_def.fields_definition().to_vec()));
+    diagnostics.extend(db.validate_field_definitions(interface_def.self_fields().to_vec()));
 
     // Implements Interfaceds validation.
-    diagnostics
-        .extend(db.validate_implements_interfaces(interface_def.implements_interfaces().to_vec()));
+    diagnostics.extend(
+        db.validate_implements_interfaces(interface_def.self_implements_interfaces().to_vec()),
+    );
 
     // When defining an interface that implements another interface, the
     // implementing interface must define each field that is specified by
@@ -78,17 +80,17 @@ pub fn validate_interface_definition(
     //
     // Returns a Missing Field error.
     let fields: HashSet<ValidationSet> = interface_def
-        .fields_definition()
+        .self_fields()
         .iter()
         .map(|field| ValidationSet {
             name: field.name().into(),
             loc: field.loc(),
         })
         .collect();
-    for implements_interface in interface_def.implements_interfaces().iter() {
+    for implements_interface in interface_def.self_implements_interfaces().iter() {
         if let Some(super_interface) = implements_interface.interface_definition(db.upcast()) {
             let implements_interface_fields: HashSet<ValidationSet> = super_interface
-                .fields_definition()
+                .self_fields()
                 .iter()
                 .map(|field| ValidationSet {
                     name: field.name().into(),
@@ -138,7 +140,7 @@ pub fn validate_implements_interfaces(
         .iter()
         .map(|(name, interface)| ValidationSet {
             name: name.to_owned(),
-            loc: interface.loc(),
+            loc: Some(interface.loc()),
         })
         .collect();
 
@@ -149,20 +151,24 @@ pub fn validate_implements_interfaces(
         .iter()
         .map(|interface| ValidationSet {
             name: interface.interface().to_owned(),
-            loc: interface.loc(),
+            loc: Some(interface.loc()),
         })
         .collect();
     let diff = implements_interfaces.difference(&defined_interfaces);
     for undefined in diff {
+        // undefined.loc should always be Some
+        let loc = undefined
+            .loc
+            .expect("missing implements interface location");
         diagnostics.push(
             ApolloDiagnostic::new(
                 db,
-                undefined.loc.into(),
+                loc.into(),
                 DiagnosticData::UndefinedDefinition {
                     name: undefined.name.clone(),
                 },
             )
-            .label(Label::new(undefined.loc, "not found in this scope")),
+            .label(Label::new(loc, "not found in this scope")),
         );
     }
 
@@ -175,11 +181,11 @@ pub fn validate_implements_interfaces(
         .filter_map(|implements_interface| {
             if let Some(interface) = implements_interface.interface_definition(db.upcast()) {
                 let child_interfaces: HashSet<ValidationSet> = interface
-                    .implements_interfaces()
+                    .self_implements_interfaces()
                     .iter()
                     .map(|interface| ValidationSet {
                         name: interface.interface().to_owned(),
-                        loc: implements_interface.loc(),
+                        loc: Some(implements_interface.loc()),
                     })
                     .collect();
                 Some(child_interfaces)
@@ -191,16 +197,20 @@ pub fn validate_implements_interfaces(
         .collect();
     let transitive_diff = transitive_interfaces.difference(&implements_interfaces);
     for undefined in transitive_diff {
+        // undefined.loc is always be Some
+        let loc = undefined
+            .loc
+            .expect("missing implements interface location");
         diagnostics.push(
             ApolloDiagnostic::new(
                 db,
-                undefined.loc.into(),
+                loc.into(),
                 DiagnosticData::TransitiveImplementedInterfaces {
                     missing_interface: undefined.name.clone(),
                 },
             )
             .label(Label::new(
-                undefined.loc,
+                loc,
                 format!("{} must also be implemented here", undefined.name),
             )),
         );
@@ -360,7 +370,9 @@ interface Image implements Resource & Node {
     fn it_generates_diagnostics_for_non_output_field_types() {
         let input = r#"
 query mainPage {
-  name
+  name {
+    width
+  }
 }
 
 type Query {

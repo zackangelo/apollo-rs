@@ -92,49 +92,46 @@ pub fn validate_unused_variables(
         .iter()
         .map(|var| ValidationSet {
             name: var.name().into(),
-            loc: var.loc(),
+            loc: Some(var.loc()),
         })
         .collect();
     let used_vars: HashSet<ValidationSet> = op
         .selection_set
-        .selection()
-        .iter()
-        .flat_map(|sel| {
-            let vars: HashSet<ValidationSet> = sel
-                .variables(db.upcast())
-                .iter()
-                .map(|var| ValidationSet {
-                    name: var.name().into(),
-                    loc: var.loc(),
-                })
-                .collect();
-            vars
+        .variables(db.upcast())
+        .into_iter()
+        .map(|var| ValidationSet {
+            name: var.name().into(),
+            loc: Some(var.loc()),
         })
         .collect();
     let undefined_vars = used_vars.difference(&defined_vars);
     let mut diagnostics: Vec<ApolloDiagnostic> = undefined_vars
         .map(|undefined_var| {
+            // undefined var location is always Some
+            let loc = undefined_var.loc.expect("missing location information");
             ApolloDiagnostic::new(
                 db,
-                undefined_var.loc.into(),
+                loc.into(),
                 DiagnosticData::UndefinedDefinition {
                     name: undefined_var.name.clone(),
                 },
             )
-            .label(Label::new(undefined_var.loc, "not found in this scope"))
+            .label(Label::new(loc, "not found in this scope"))
         })
         .collect();
 
     let unused_vars = defined_vars.difference(&used_vars);
     diagnostics.extend(unused_vars.map(|unused_var| {
+        // unused var location is always Some
+        let loc = unused_var.loc.expect("missing location information");
         ApolloDiagnostic::new(
             db,
-            unused_var.loc.into(),
+            loc.into(),
             DiagnosticData::UnusedVariable {
                 name: unused_var.name.clone(),
             },
         )
-        .label(Label::new(unused_var.loc, "this variable is never used"))
+        .label(Label::new(loc, "this variable is never used"))
     }));
 
     diagnostics

@@ -24,10 +24,10 @@ pub(crate) fn types_definitions_by_name(
         };
     }
     add!(scalars, ScalarTypeDefinition);
-    add!(object_types, ObjectTypeDefinition);
+    add!(object_types_with_built_ins, ObjectTypeDefinition);
     add!(interfaces, InterfaceTypeDefinition);
     add!(unions, UnionTypeDefinition);
-    add!(enums, EnumTypeDefinition);
+    add!(enums_with_built_ins, EnumTypeDefinition);
     add!(input_objects, InputObjectTypeDefinition);
     Arc::new(map)
 }
@@ -67,7 +67,7 @@ pub(crate) fn find_object_type_by_name(
     db: &dyn HirDatabase,
     name: String,
 ) -> Option<Arc<ObjectTypeDefinition>> {
-    db.object_types().get(&name).cloned()
+    db.object_types_with_built_ins().get(&name).cloned()
 }
 
 pub(crate) fn find_union_by_name(
@@ -81,7 +81,14 @@ pub(crate) fn find_enum_by_name(
     db: &dyn HirDatabase,
     name: String,
 ) -> Option<Arc<EnumTypeDefinition>> {
-    db.enums().get(&name).cloned()
+    db.enums_with_built_ins().get(&name).cloned()
+}
+
+pub(crate) fn find_scalar_by_name(
+    db: &dyn HirDatabase,
+    name: String,
+) -> Option<Arc<ScalarTypeDefinition>> {
+    db.scalars().get(&name).cloned()
 }
 
 pub(crate) fn find_interface_by_name(
@@ -106,7 +113,11 @@ pub(crate) fn find_types_with_directive(
     let definitions = db
         .types_definitions_by_name()
         .values()
-        .filter(|def| def.directives().iter().any(|dir| dir.name() == directive))
+        .filter(|def| {
+            def.self_directives()
+                .iter()
+                .any(|dir| dir.name() == directive)
+        })
         .cloned()
         .collect();
     Arc::new(definitions)
@@ -208,6 +219,41 @@ pub(crate) fn operation_fragment_spread_fields(
     Arc::new(fields)
 }
 
+pub(crate) fn flattened_operation_fields(
+    db: &dyn HirDatabase,
+    selection_set: SelectionSet,
+) -> Vec<Arc<Field>> {
+    fn flatten_selection_set(
+        db: &dyn HirDatabase,
+        selection_set: &SelectionSet,
+        seen: &mut HashSet<SelectionSet>,
+    ) -> Vec<Arc<Field>> {
+        if seen.contains(selection_set) {
+            return vec![];
+        }
+        seen.insert(selection_set.clone());
+
+        selection_set
+            .selection()
+            .iter()
+            .flat_map(|sel| match sel {
+                Selection::Field(field) => {
+                    vec![Arc::clone(field)]
+                }
+                Selection::FragmentSpread(fragment_spread) => fragment_spread
+                    .fragment(db)
+                    .map(|fragment| flatten_selection_set(db, fragment.selection_set(), seen))
+                    .unwrap_or_default(),
+                Selection::InlineFragment(fragment_spread) => {
+                    flatten_selection_set(db, fragment_spread.selection_set(), seen)
+                }
+            })
+            .collect()
+    }
+
+    flatten_selection_set(db, &selection_set, &mut HashSet::new())
+}
+
 // Should be part of operation's db
 // NOTE: potentially want to return a hashmap of variables and their types?
 pub(crate) fn selection_variables(
@@ -271,8 +317,8 @@ pub(crate) fn subtype_map(db: &dyn HirDatabase) -> Arc<HashMap<String, HashSet<S
             .or_default()
             .insert(value.to_owned())
     };
-    for (name, definition) in &*db.object_types() {
-        for implements in definition.implements_interfaces() {
+    for (name, definition) in &*db.object_types_with_built_ins() {
+        for implements in definition.self_implements_interfaces() {
             add(implements.interface(), name);
         }
         for extension in definition.extensions() {
@@ -282,7 +328,7 @@ pub(crate) fn subtype_map(db: &dyn HirDatabase) -> Arc<HashMap<String, HashSet<S
         }
     }
     for (name, definition) in &*db.interfaces() {
-        for implements in definition.implements_interfaces() {
+        for implements in definition.self_implements_interfaces() {
             add(implements.interface(), name);
         }
         for extension in definition.extensions() {
@@ -292,7 +338,7 @@ pub(crate) fn subtype_map(db: &dyn HirDatabase) -> Arc<HashMap<String, HashSet<S
         }
     }
     for (name, definition) in &*db.unions() {
-        for member in definition.union_members() {
+        for member in definition.self_members() {
             add(name, member.name());
         }
         for extension in definition.extensions() {

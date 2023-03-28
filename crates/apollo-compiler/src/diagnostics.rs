@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use crate::database::hir::{DirectiveLocation, HirNodeLocation};
 use crate::database::{InputDatabase, SourceCache};
@@ -83,11 +83,11 @@ impl Label {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub struct ApolloDiagnostic {
-    cache: SourceCache,
+    cache: Arc<SourceCache>,
     pub location: DiagnosticLocation,
     pub labels: Vec<Label>,
     pub help: Option<String>,
-    pub data: DiagnosticData,
+    pub data: Box<DiagnosticData>,
 }
 
 impl ApolloDiagnostic {
@@ -101,7 +101,7 @@ impl ApolloDiagnostic {
             location,
             labels: vec![],
             help: None,
-            data,
+            data: Box::new(data),
         }
     }
 
@@ -128,7 +128,9 @@ impl ApolloDiagnostic {
 impl fmt::Display for ApolloDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut buf = std::io::Cursor::new(Vec::<u8>::new());
-        self.to_report().write(&self.cache, &mut buf).unwrap();
+        self.to_report()
+            .write(self.cache.as_ref(), &mut buf)
+            .unwrap();
         writeln!(f, "{}", std::str::from_utf8(&buf.into_inner()).unwrap())
     }
 }
@@ -137,7 +139,7 @@ impl fmt::Display for ApolloDiagnostic {
 #[derive(Debug, Error, Clone, Hash, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DiagnosticData {
-    #[error("syntax error")]
+    #[error("syntax error: {message}")]
     SyntaxError { message: String },
     #[error("expected identifier")]
     MissingIdent,
@@ -189,7 +191,7 @@ pub enum DiagnosticData {
         /// Name of the type being extended
         name: String,
         /// Location of the original definition. This may be None when extending a builtin GraphQL type.
-        definition: Option<DiagnosticLocation>,
+        definition: DiagnosticLocation,
         /// Location of the extension
         extension: DiagnosticLocation,
     },
@@ -258,12 +260,30 @@ pub enum DiagnosticData {
         /// current location where the directive is used
         dir_loc: DirectiveLocation,
         /// The source location where the directive that's being used was defined.
-        directive_def: Option<DiagnosticLocation>,
+        directive_def: DiagnosticLocation,
+    },
+    #[error("non-repeatable directive {name} can only be used once per location")]
+    UniqueDirective {
+        /// Name of the non-unique directive.
+        name: String,
+        original_call: DiagnosticLocation,
+        conflicting_call: DiagnosticLocation,
     },
     #[error("subscription operations can not have an introspection field as a root field")]
     IntrospectionField {
         /// Name of the field
         field: String,
+    },
+    #[error("subselection set for scalar and enum types must be empty")]
+    DisallowedSubselection,
+    #[error("interface, union and object types must have a subselection set")]
+    MissingSubselection,
+    #[error("operation must not select different types using the same field name `{field}`")]
+    ConflictingField {
+        /// Name of the non-unique field.
+        field: String,
+        original_selection: DiagnosticLocation,
+        redefined_selection: DiagnosticLocation,
     },
 }
 

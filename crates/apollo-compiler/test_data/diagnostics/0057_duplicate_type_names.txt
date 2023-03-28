@@ -1,6 +1,7 @@
 [
     ApolloDiagnostic {
         cache: {
+            0: "built_in_types.graphql",
             57: "0057_duplicate_type_names.graphql",
         },
         location: DiagnosticLocation {
@@ -56,6 +57,7 @@
     },
     ApolloDiagnostic {
         cache: {
+            0: "built_in_types.graphql",
             57: "0057_duplicate_type_names.graphql",
         },
         location: DiagnosticLocation {
@@ -111,6 +113,7 @@
     },
     ApolloDiagnostic {
         cache: {
+            0: "built_in_types.graphql",
             57: "0057_duplicate_type_names.graphql",
         },
         location: DiagnosticLocation {
@@ -166,6 +169,7 @@
     },
     ApolloDiagnostic {
         cache: {
+            0: "built_in_types.graphql",
             57: "0057_duplicate_type_names.graphql",
         },
         location: DiagnosticLocation {

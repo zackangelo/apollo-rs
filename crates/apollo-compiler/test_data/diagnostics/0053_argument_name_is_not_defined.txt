@@ -1,6 +1,7 @@
 [
     ApolloDiagnostic {
         cache: {
+            0: "built_in_types.graphql",
             53: "0053_argument_name_is_not_defined.graphql",
         },
         location: DiagnosticLocation {
@@ -19,7 +20,7 @@
                     offset: 116,
                     length: 7,
                 },
-                text: "argument by this name not found",
+                text: "argument name not found",
             },
             Label {
                 location: DiagnosticLocation {
@@ -39,6 +40,7 @@
     },
     ApolloDiagnostic {
         cache: {
+            0: "built_in_types.graphql",
             53: "0053_argument_name_is_not_defined.graphql",
         },
         location: DiagnosticLocation {
@@ -57,7 +59,7 @@
                     offset: 79,
                     length: 7,
                 },
-                text: "argument by this name not found",
+                text: "argument name not found",
             },
             Label {
                 location: DiagnosticLocation {
@@ -77,6 +79,7 @@
     },
     ApolloDiagnostic {
         cache: {
+            0: "built_in_types.graphql",
             53: "0053_argument_name_is_not_defined.graphql",
         },
         location: DiagnosticLocation {
@@ -95,7 +98,7 @@
                     offset: 88,
                     length: 7,
                 },
-                text: "argument by this name not found",
+                text: "argument name not found",
             },
             Label {
                 location: DiagnosticLocation {

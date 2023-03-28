@@ -8,11 +8,22 @@ use apollo_parser::ast::{self};
 use apollo_parser::SyntaxNode;
 use indexmap::IndexMap;
 
-use crate::database::document::*;
+use crate::database::document;
 use crate::database::FileId;
 use crate::hir::*;
 use crate::AstDatabase;
 use crate::InputDatabase;
+
+const INTROSPECTION_OBJECT_TYS: [&str; 6] = [
+    "__Schema",
+    "__Type",
+    "__Field",
+    "__InputValue",
+    "__EnumValue",
+    "__Directive",
+];
+
+const INTROSPECTION_ENUM_TYS: [&str; 2] = ["__TypeKind", "__DirectiveLocation"];
 
 // HIR creators *ignore* missing data entirely. *Only* missing data
 // as a result of parser errors should be ignored.
@@ -20,51 +31,74 @@ use crate::InputDatabase;
 #[salsa::query_group(HirStorage)]
 pub trait HirDatabase: InputDatabase + AstDatabase {
     /// Return all type system definitions defined in the compiler.
+    #[salsa::invoke(type_system_definitions)]
     fn type_system_definitions(&self) -> Arc<TypeSystemDefinitions>;
 
     /// Return a [`TypeSystem`] containing definitions and more.
     ///
     /// This can be used with [`set_type_system_hir`][crate::ApolloCompiler::set_type_system_hir]
     /// on another compiler.
+    #[salsa::invoke(type_system)]
     fn type_system(&self) -> Arc<TypeSystem>;
 
     /// Return all the extensions defined in the type system.
+    #[salsa::invoke(extensions)]
     fn extensions(&self) -> Arc<Vec<TypeExtension>>;
 
     /// Return all the operations defined in a file.
+    #[salsa::invoke(operations)]
     fn operations(&self, file_id: FileId) -> Arc<Vec<Arc<OperationDefinition>>>;
 
     /// Return all the fragments defined in a file.
+    #[salsa::invoke(fragments)]
     fn fragments(&self, file_id: FileId) -> ByName<FragmentDefinition>;
 
     /// Return all the operations defined in any file.
+    #[salsa::invoke(all_operations)]
     fn all_operations(&self) -> Arc<Vec<Arc<OperationDefinition>>>;
 
     /// Return all the fragments defined in any file.
+    #[salsa::invoke(all_fragments)]
     fn all_fragments(&self) -> ByName<FragmentDefinition>;
 
     /// Return schema definition defined in the compiler.
+    #[salsa::invoke(schema)]
     fn schema(&self) -> Arc<SchemaDefinition>;
 
     /// Return all object type definitions defined in the compiler.
+    #[salsa::invoke(object_types)]
     fn object_types(&self) -> ByName<ObjectTypeDefinition>;
 
+    /// Return all object type definitions, including instrospection types like
+    /// `__Schema`, defined in the compiler.
+    fn object_types_with_built_ins(&self) -> ByName<ObjectTypeDefinition>;
+
     /// Return all scalar type definitions defined in the compiler.
+    #[salsa::invoke(scalars)]
     fn scalars(&self) -> ByName<ScalarTypeDefinition>;
 
     /// Return all enum type definitions defined in the compiler.
+    #[salsa::invoke(enums)]
     fn enums(&self) -> ByName<EnumTypeDefinition>;
 
+    /// Return all enums, including introspection types like `__TypeKind`, defined
+    /// in the compiler.
+    fn enums_with_built_ins(&self) -> ByName<EnumTypeDefinition>;
+
     /// Return all union type definitions defined in the compiler.
+    #[salsa::invoke(unions)]
     fn unions(&self) -> ByName<UnionTypeDefinition>;
 
     /// Return all interface type definitions defined in the compiler.
+    #[salsa::invoke(interfaces)]
     fn interfaces(&self) -> ByName<InterfaceTypeDefinition>;
 
     /// Return all directive definitions defined in the compiler.
+    #[salsa::invoke(directive_definitions)]
     fn directive_definitions(&self) -> ByName<DirectiveDefinition>;
 
     /// Return all input object type definitions defined in the compiler.
+    #[salsa::invoke(input_objects)]
     fn input_objects(&self) -> ByName<InputObjectTypeDefinition>;
 
     // Derived from above queries:
@@ -74,6 +108,7 @@ pub trait HirDatabase: InputDatabase + AstDatabase {
     /// be returned.
     /// If `name` is `None`, and there is more than one operation, `None` will
     /// be returned.
+    #[salsa::invoke(document::find_operation)]
     fn find_operation(
         &self,
         file_id: FileId,
@@ -83,6 +118,7 @@ pub trait HirDatabase: InputDatabase + AstDatabase {
     /// Return an fragment definition corresponding to the name and file id.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_fragment_by_name)]
     fn find_fragment_by_name(
         &self,
         file_id: FileId,
@@ -92,65 +128,92 @@ pub trait HirDatabase: InputDatabase + AstDatabase {
     /// Return an object type definition corresponding to the name.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_object_type_by_name)]
     fn find_object_type_by_name(&self, name: String) -> Option<Arc<ObjectTypeDefinition>>;
 
     /// Return an union type definition corresponding to the name.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_union_by_name)]
     fn find_union_by_name(&self, name: String) -> Option<Arc<UnionTypeDefinition>>;
 
     /// Return an enum type definition corresponding to the name.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_enum_by_name)]
     fn find_enum_by_name(&self, name: String) -> Option<Arc<EnumTypeDefinition>>;
+
+    /// Return a scalar type definition corresponding to the name.
+    /// Result of this query is not cached internally.
+    #[salsa::transparent]
+    #[salsa::invoke(document::find_scalar_by_name)]
+    fn find_scalar_by_name(&self, name: String) -> Option<Arc<ScalarTypeDefinition>>;
 
     /// Return an interface type definition corresponding to the name.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_interface_by_name)]
     fn find_interface_by_name(&self, name: String) -> Option<Arc<InterfaceTypeDefinition>>;
 
     /// Return an directive definition corresponding to the name.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_directive_definition_by_name)]
     fn find_directive_definition_by_name(&self, name: String) -> Option<Arc<DirectiveDefinition>>;
 
     /// Return any type definitions that contain the corresponding directive
+    #[salsa::invoke(document::find_types_with_directive)]
     fn find_types_with_directive(&self, directive: String) -> Arc<Vec<TypeDefinition>>;
 
     /// Return an input object type definition corresponding to the name.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_input_object_by_name)]
     fn find_input_object_by_name(&self, name: String) -> Option<Arc<InputObjectTypeDefinition>>;
 
+    #[salsa::invoke(document::types_definitions_by_name)]
     fn types_definitions_by_name(&self) -> Arc<IndexMap<String, TypeDefinition>>;
 
     /// Return a type definition corresponding to the name.
     /// Result of this query is not cached internally.
     #[salsa::transparent]
+    #[salsa::invoke(document::find_type_definition_by_name)]
     fn find_type_definition_by_name(&self, name: String) -> Option<TypeDefinition>;
 
     /// Return all query operations in a corresponding file.
+    #[salsa::invoke(document::query_operations)]
     fn query_operations(&self, file_id: FileId) -> Arc<Vec<Arc<OperationDefinition>>>;
 
     /// Return all mutation operations in a corresponding file.
+    #[salsa::invoke(document::mutation_operations)]
     fn mutation_operations(&self, file_id: FileId) -> Arc<Vec<Arc<OperationDefinition>>>;
 
     /// Return all subscription operations in a corresponding file.
+    #[salsa::invoke(document::subscription_operations)]
     fn subscription_operations(&self, file_id: FileId) -> Arc<Vec<Arc<OperationDefinition>>>;
 
-    /// Return all operation fields in a corresponding selection set.
+    /// Return the fields in a selection set, not including fragments.
+    #[salsa::invoke(document::operation_fields)]
     fn operation_fields(&self, selection_set: SelectionSet) -> Arc<Vec<Field>>;
 
     /// Return all operation inline fragment fields in a corresponding selection set.
+    #[salsa::invoke(document::operation_inline_fragment_fields)]
     fn operation_inline_fragment_fields(&self, selection_set: SelectionSet) -> Arc<Vec<Field>>;
 
     /// Return all operation fragment spread fields in a corresponding selection set.
+    #[salsa::invoke(document::operation_fragment_spread_fields)]
     fn operation_fragment_spread_fields(&self, selection_set: SelectionSet) -> Arc<Vec<Field>>;
 
+    /// Return the fields that `selection_set` selects including visiting fragments and inline fragments.
+    #[salsa::invoke(document::flattened_operation_fields)]
+    fn flattened_operation_fields(&self, selection_set: SelectionSet) -> Vec<Arc<Field>>;
+
     /// Return all variables in a corresponding selection set.
+    #[salsa::invoke(document::selection_variables)]
     fn selection_variables(&self, selection_set: SelectionSet) -> Arc<HashSet<Variable>>;
 
     /// Return all variables in corresponding variable definitions.
+    #[salsa::invoke(document::operation_definition_variables)]
     fn operation_definition_variables(
         &self,
         variables: Arc<Vec<VariableDefinition>>,
@@ -181,6 +244,8 @@ pub trait HirDatabase: InputDatabase + AstDatabase {
     ///
     /// - `Foo` and `Bar` are a subtypes of `UnionType`.
     /// - `ObjectType` and `InterfaceType` are subtypes of `Baz`.
+
+    #[salsa::invoke(document::subtype_map)]
     fn subtype_map(&self) -> Arc<HashMap<String, HashSet<String>>>;
 
     /// Return `true` if the provided `maybe_subtype` is a subtype of the
@@ -212,6 +277,7 @@ pub trait HirDatabase: InputDatabase + AstDatabase {
     /// - `db.is_subtype("Baz".into(), "ObjectType".into()) // true`
     /// - `db.is_subtype("Baz".into(), "InterfaceType".into()) // true`
     #[salsa::transparent]
+    #[salsa::invoke(document::is_subtype)]
     fn is_subtype(&self, abstract_type: String, maybe_subtype: String) -> bool;
 }
 
@@ -219,7 +285,7 @@ fn type_system_definitions(db: &dyn HirDatabase) -> Arc<TypeSystemDefinitions> {
     Arc::new(TypeSystemDefinitions {
         schema: db.schema(),
         scalars: db.scalars(),
-        objects: db.object_types(),
+        objects: db.object_types_with_built_ins(),
         interfaces: db.interfaces(),
         unions: db.unions(),
         enums: db.enums(),
@@ -344,24 +410,11 @@ fn schema(db: &dyn HirDatabase) -> Arc<SchemaDefinition> {
         // Panics in `ApolloCompiler` methods ensure `type_definition_files().is_empty()`
         return precomputed.definitions.schema.clone();
     }
-    let mut schema_def = type_definitions(db, schema_definition)
-        .next()
-        .unwrap_or_default();
-
-    // NOTE(@lrlna):
-    //
-    // "Query", "Subscription", "Mutation" object type definitions do not need
-    // to be explicitly defined in a schema definition, but are implicitly
-    // added.
-    //
-    // There will be a time when we need to distinguish between implicit and
-    // explicit definitions for validation purposes.
-    let type_defs = add_object_type_id_to_schema(db);
-    type_defs
-        .iter()
-        .for_each(|type_def| schema_def.set_root_operation_type_definition(type_def.clone()));
-
-    Arc::new(schema_def)
+    Arc::new(
+        type_definitions(db, schema_definition)
+            .next()
+            .unwrap_or_else(|| implicit_schema_definition(db)),
+    )
 }
 
 macro_rules! by_name {
@@ -382,7 +435,7 @@ macro_rules! by_name_extensible {
             // Orphan or incorrect extensions are reported by validation.
             if let TypeExtension::$extension_type(ext) = ext {
                 if let Some(def) = map.get_mut(ext.name()) {
-                    Arc::get_mut(def).unwrap().extensions.push(Arc::clone(ext))
+                    Arc::get_mut(def).unwrap().push_extension(Arc::clone(ext))
                 }
             }
         }
@@ -390,7 +443,7 @@ macro_rules! by_name_extensible {
     }};
 }
 
-fn object_types(db: &dyn HirDatabase) -> ByName<ObjectTypeDefinition> {
+fn object_types_with_built_ins(db: &dyn HirDatabase) -> ByName<ObjectTypeDefinition> {
     if let Some(precomputed) = db.type_system_hir_input() {
         // Panics in `ApolloCompiler` methods ensure `type_definition_files().is_empty()`
         return precomputed.definitions.objects.clone();
@@ -402,24 +455,37 @@ fn object_types(db: &dyn HirDatabase) -> ByName<ObjectTypeDefinition> {
     ))
 }
 
+fn object_types(db: &dyn HirDatabase) -> ByName<ObjectTypeDefinition> {
+    let mut objs = db.object_types_with_built_ins().as_ref().clone();
+
+    objs.retain(|_k, v| !v.is_introspection());
+    Arc::new(objs)
+}
+
 fn scalars(db: &dyn HirDatabase) -> ByName<ScalarTypeDefinition> {
     if let Some(precomputed) = db.type_system_hir_input() {
         // Panics in `ApolloCompiler` methods ensure `type_definition_files().is_empty()`
         return precomputed.definitions.scalars.clone();
     }
-    Arc::new(built_in_scalars(by_name_extensible!(
+    Arc::new(by_name_extensible!(
         db,
         scalar_definition,
         ScalarTypeExtension
-    )))
+    ))
 }
-
-fn enums(db: &dyn HirDatabase) -> ByName<EnumTypeDefinition> {
+fn enums_with_built_ins(db: &dyn HirDatabase) -> ByName<EnumTypeDefinition> {
     if let Some(precomputed) = db.type_system_hir_input() {
         // Panics in `ApolloCompiler` methods ensure `type_definition_files().is_empty()`
         return precomputed.definitions.enums.clone();
     }
     Arc::new(by_name_extensible!(db, enum_definition, EnumTypeExtension))
+}
+
+fn enums(db: &dyn HirDatabase) -> ByName<EnumTypeDefinition> {
+    let mut enums = db.enums_with_built_ins().as_ref().clone();
+
+    enums.retain(|_k, v| !v.is_introspection());
+    Arc::new(enums)
 }
 
 fn unions(db: &dyn HirDatabase) -> ByName<UnionTypeDefinition> {
@@ -459,7 +525,7 @@ fn directive_definitions(db: &dyn HirDatabase) -> ByName<DirectiveDefinition> {
         // Panics in `ApolloCompiler` methods ensure `type_definition_files().is_empty()`
         return precomputed.definitions.directives.clone();
     }
-    Arc::new(built_in_directives(by_name!(db, directive_definition)))
+    Arc::new(by_name!(db, directive_definition))
 }
 
 fn operation_definition(
@@ -473,17 +539,13 @@ fn operation_definition(
     let name = op_def.name().map(|n| name_hir_node(n, file_id));
     let ty = operation_type(op_def.operation_type());
     let variables = variable_definitions(op_def.variable_definitions(), file_id);
-    let parent_object_ty = db
-        .schema()
-        .root_operation_type_definition()
-        .iter()
-        .find_map(|op| {
-            if op.operation_ty() == ty {
-                Some(op.named_type().name())
-            } else {
-                None
-            }
-        });
+    let parent_object_ty = db.schema().self_root_operations().iter().find_map(|op| {
+        if op.operation_ty() == ty {
+            Some(op.named_type().name())
+        } else {
+            None
+        }
+    });
     let selection_set = selection_set(db, op_def.selection_set(), parent_object_ty, file_id);
     let directives = directives(op_def.directives(), file_id);
     let loc = location(file_id, op_def.syntax());
@@ -533,31 +595,113 @@ fn schema_definition(
     schema_def: ast::SchemaDefinition,
     file_id: FileId,
 ) -> Option<SchemaDefinition> {
-    let extensions = type_definitions(db, |_db, def: ast::SchemaExtension, file_id| {
-        Some(Arc::new(SchemaExtension {
-            directives: directives(def.directives(), file_id),
-            root_operation_type_definition: root_operation_type_definition(
-                def.root_operation_type_definitions(),
-                file_id,
-            ),
-            loc: location(file_id, def.syntax()),
-        }))
-    })
-    .collect();
-
     let description = description(schema_def.description());
     let directives = directives(schema_def.directives(), file_id);
-    let root_operation_type_definition =
+    let mut operations =
         root_operation_type_definition(schema_def.root_operation_type_definitions(), file_id);
     let loc = location(file_id, schema_def.syntax());
+    let extensions = schema_extensions(db);
+    let mut root_operation_names = root_operations_names(&operations, &extensions);
+    add_implicit_operations(db, &mut operations, &mut root_operation_names);
 
     Some(SchemaDefinition {
         description,
         directives,
-        root_operation_type_definition,
+        root_operation_type_definition: Arc::new(operations),
         loc: Some(loc),
         extensions,
+        root_operation_names,
     })
+}
+
+fn implicit_schema_definition(db: &dyn HirDatabase) -> SchemaDefinition {
+    let extensions = schema_extensions(db);
+    let mut operations = Vec::new();
+    let mut root_operation_names = root_operations_names(&operations, &extensions);
+    add_implicit_operations(db, &mut operations, &mut root_operation_names);
+    SchemaDefinition {
+        description: None,
+        directives: Arc::new(Vec::new()),
+        root_operation_type_definition: Arc::new(operations),
+        loc: None,
+        extensions,
+        root_operation_names,
+    }
+}
+
+fn schema_extensions(db: &dyn HirDatabase) -> Vec<Arc<SchemaExtension>> {
+    type_definitions(db, |_db, def: ast::SchemaExtension, file_id| {
+        let directives = directives(def.directives(), file_id);
+        let root_operation_type_definition = Arc::new(root_operation_type_definition(
+            def.root_operation_type_definitions(),
+            file_id,
+        ));
+        let loc = location(file_id, def.syntax());
+        Some(Arc::new(SchemaExtension {
+            directives,
+            root_operation_type_definition,
+            loc,
+        }))
+    })
+    .collect()
+}
+
+fn root_operations_names(
+    root_operation_type_definition: &[RootOperationTypeDefinition],
+    extensions: &[Arc<SchemaExtension>],
+) -> RootOperationNames {
+    let mut names = RootOperationNames::default();
+    let mut add_operations = |ops: &[RootOperationTypeDefinition]| {
+        for op in ops {
+            let name_field = match op.operation_ty() {
+                OperationType::Query => &mut names.query,
+                OperationType::Mutation => &mut names.mutation,
+                OperationType::Subscription => &mut names.subscription,
+            };
+            if name_field.is_none() {
+                *name_field = Some(op.named_type().name());
+            }
+        }
+    };
+    add_operations(root_operation_type_definition);
+    for extension in extensions {
+        add_operations(extension.root_operations());
+    }
+    names
+}
+
+/// https://spec.graphql.org/October2021/#sec-Root-Operation-Types.Default-Root-Operation-Type-Names
+///
+/// To distinguish between implicit and explicit definitions for validation purposes,
+/// check `operation.loc.is_none()`.
+///
+/// NOTE(@lrlna):
+/// "Query", "Subscription", "Mutation" object type definitions do not need
+/// to be explicitly defined in a schema definition, but are implicitly
+/// added.
+fn add_implicit_operations(
+    db: &dyn HirDatabase,
+    operations: &mut Vec<RootOperationTypeDefinition>,
+    names: &mut RootOperationNames,
+) {
+    for (name_field, operation_ty) in [
+        (&mut names.query, OperationType::Query),
+        (&mut names.mutation, OperationType::Mutation),
+        (&mut names.subscription, OperationType::Subscription),
+    ] {
+        let name = operation_ty.into();
+        if name_field.is_none() && db.object_types_with_built_ins().contains_key(name) {
+            *name_field = Some(name.to_owned());
+            operations.push(RootOperationTypeDefinition {
+                operation_ty,
+                named_type: Type::Named {
+                    name: name.to_owned(),
+                    loc: None,
+                },
+                loc: None,
+            })
+        }
+    }
 }
 
 fn object_type_definition(
@@ -571,6 +715,11 @@ fn object_type_definition(
     let directives = directives(obj_def.directives(), file_id);
     let fields_definition = fields_definition(obj_def.fields_definition(), file_id);
     let loc = location(file_id, obj_def.syntax());
+    let fields_by_name = ByNameWithExtensions::new(&fields_definition, FieldDefinition::name);
+    let implements_interfaces_by_name =
+        ByNameWithExtensions::new(&implements_interfaces, ImplementsInterface::interface);
+    let is_introspection = INTROSPECTION_OBJECT_TYS.contains(&obj_def.name()?.text().as_str());
+    let implicit_fields = Arc::new(vec![type_field(), typename_field(), schema_field()]);
 
     // TODO(@goto-bus-stop) when a name is missing on this,
     // we might still want to produce a HIR node, so we can validate other parts of the definition
@@ -582,6 +731,10 @@ fn object_type_definition(
         fields_definition,
         loc,
         extensions: Vec::new(),
+        fields_by_name,
+        implements_interfaces_by_name,
+        is_introspection,
+        implicit_fields,
     })
 }
 
@@ -600,7 +753,7 @@ fn object_type_extension(
 }
 
 fn scalar_definition(
-    _db: &dyn HirDatabase,
+    db: &dyn HirDatabase,
     scalar_def: ast::ScalarTypeDefinition,
     file_id: FileId,
 ) -> Option<ScalarTypeDefinition> {
@@ -608,6 +761,7 @@ fn scalar_definition(
     let name = name(scalar_def.name(), file_id)?;
     let directives = directives(scalar_def.directives(), file_id);
     let loc = location(file_id, scalar_def.syntax());
+    let built_in = db.input(file_id).source_type().is_built_in();
 
     // TODO(@goto-bus-stop) when a name is missing on this,
     // we might still want to produce a HIR node, so we can validate other parts of the definition
@@ -615,8 +769,8 @@ fn scalar_definition(
         description,
         name,
         directives,
-        loc: Some(loc),
-        built_in: false,
+        loc,
+        built_in,
         extensions: Vec::new(),
     })
 }
@@ -643,6 +797,9 @@ fn enum_definition(
     let directives = directives(enum_def.directives(), file_id);
     let enum_values_definition = enum_values_definition(enum_def.enum_values_definition(), file_id);
     let loc = location(file_id, enum_def.syntax());
+    let values_by_name =
+        ByNameWithExtensions::new(&enum_values_definition, EnumValueDefinition::enum_value);
+    let is_introspection = INTROSPECTION_ENUM_TYS.contains(&enum_def.name()?.text().as_str());
 
     // TODO(@goto-bus-stop) when a name is missing on this,
     // we might still want to produce a HIR node, so we can validate other parts of the definition
@@ -653,6 +810,8 @@ fn enum_definition(
         enum_values_definition,
         loc,
         extensions: Vec::new(),
+        values_by_name,
+        is_introspection,
     })
 }
 
@@ -677,7 +836,6 @@ fn enum_values_definition(
         Some(enum_values) => {
             let enum_values = enum_values
                 .enum_value_definitions()
-                .into_iter()
                 .filter_map(|e| enum_value_definition(e, file_id))
                 .collect();
             Arc::new(enum_values)
@@ -713,6 +871,8 @@ fn union_definition(
     let directives = directives(union_def.directives(), file_id);
     let union_members = union_members(union_def.union_member_types(), file_id);
     let loc = location(file_id, union_def.syntax());
+    let members_by_name = ByNameWithExtensions::new(&union_members, UnionMember::name);
+    let implicit_fields = Arc::new(vec![typename_field()]);
 
     // TODO(@goto-bus-stop) when a name is missing on this,
     // we might still want to produce a HIR node, so we can validate other parts of the definition
@@ -723,6 +883,8 @@ fn union_definition(
         union_members,
         loc,
         extensions: Vec::new(),
+        members_by_name,
+        implicit_fields,
     })
 }
 
@@ -731,11 +893,17 @@ fn union_extension(
     def: ast::UnionTypeExtension,
     file_id: FileId,
 ) -> Option<Arc<UnionTypeExtension>> {
+    let directives = directives(def.directives(), file_id);
+    let name = name(def.name(), file_id)?;
+    let union_members = union_members(def.union_member_types(), file_id);
+    let loc = location(file_id, def.syntax());
+    let members_by_name = ByNameWithExtensions::new(&union_members, UnionMember::name);
     Some(Arc::new(UnionTypeExtension {
-        directives: directives(def.directives(), file_id),
-        name: name(def.name(), file_id)?,
-        union_members: union_members(def.union_member_types(), file_id),
-        loc: location(file_id, def.syntax()),
+        directives,
+        name,
+        union_members,
+        loc,
+        members_by_name,
     }))
 }
 
@@ -747,7 +915,6 @@ fn union_members(
         Some(members) => {
             let mems = members
                 .named_types()
-                .into_iter()
                 .filter_map(|u| union_member(u, file_id))
                 .collect();
             Arc::new(mems)
@@ -775,6 +942,10 @@ fn interface_definition(
     let directives = directives(interface_def.directives(), file_id);
     let fields_definition = fields_definition(interface_def.fields_definition(), file_id);
     let loc = location(file_id, interface_def.syntax());
+    let fields_by_name = ByNameWithExtensions::new(&fields_definition, FieldDefinition::name);
+    let implements_interfaces_by_name =
+        ByNameWithExtensions::new(&implements_interfaces, ImplementsInterface::interface);
+    let implicit_fields = Arc::new(vec![typename_field()]);
 
     // TODO(@goto-bus-stop) when a name is missing on this,
     // we might still want to produce a HIR node, so we can validate other parts of the definition
@@ -786,6 +957,9 @@ fn interface_definition(
         fields_definition,
         loc,
         extensions: Vec::new(),
+        fields_by_name,
+        implements_interfaces_by_name,
+        implicit_fields,
     })
 }
 
@@ -823,7 +997,7 @@ fn directive_definition(
         arguments,
         repeatable,
         directive_locations,
-        loc: Some(loc),
+        loc,
     })
 }
 
@@ -838,6 +1012,8 @@ fn input_object_definition(
     let input_fields_definition =
         input_fields_definition(input_obj.input_fields_definition(), file_id);
     let loc = location(file_id, input_obj.syntax());
+    let input_fields_by_name =
+        ByNameWithExtensions::new(&input_fields_definition, InputValueDefinition::name);
 
     // TODO(@goto-bus-stop) when a name is missing on this,
     // we might still want to produce a HIR node, so we can validate other parts of the definition
@@ -848,6 +1024,7 @@ fn input_object_definition(
         input_fields_definition,
         loc,
         extensions: Vec::new(),
+        input_fields_by_name,
     })
 }
 
@@ -888,36 +1065,86 @@ fn extension(db: &dyn HirDatabase, def: ast::Definition, file_id: FileId) -> Opt
     }
 }
 
-fn add_object_type_id_to_schema(db: &dyn HirDatabase) -> Arc<Vec<RootOperationTypeDefinition>> {
-    // Schema Definition does not have to be present in the SDL if ObjectType name is
-    // - Query
-    // - Subscription
-    // - Mutation
-    //
-    // Compiler's internal schema, however, should have a reference to these
-    // object types if they are present
-    let type_defs: Vec<RootOperationTypeDefinition> = db
-        .object_types()
-        .values()
-        .filter_map(|obj_type| {
-            let obj_name = obj_type.name();
-            if matches!(obj_name, "Query" | "Subscription" | "Mutation") {
-                let operation_type = obj_name.into();
-                Some(RootOperationTypeDefinition {
-                    operation_ty: operation_type,
-                    named_type: Type::Named {
-                        name: obj_name.to_string(),
-                        loc: None,
-                    },
+fn type_field() -> FieldDefinition {
+    FieldDefinition {
+        description: None,
+        name: Name {
+            src: "__type".into(),
+            loc: None,
+        },
+        arguments: ArgumentsDefinition {
+            input_values: Arc::new(vec![InputValueDefinition {
+                description: None,
+                name: Name {
+                    src: "name".into(),
                     loc: None,
-                })
-            } else {
-                None
-            }
-        })
-        .collect();
+                },
+                ty: Type::NonNull {
+                    ty: Box::new(Type::Named {
+                        name: "String".into(),
+                        loc: None,
+                    }),
+                    loc: None,
+                },
+                default_value: None,
+                directives: Arc::new(Vec::new()),
+                loc: None,
+            }]),
+            loc: None,
+        },
+        ty: Type::Named {
+            name: "__Type".into(),
+            loc: None,
+        },
+        directives: Arc::new(Vec::new()),
+        loc: None,
+    }
+}
 
-    Arc::new(type_defs)
+fn schema_field() -> FieldDefinition {
+    FieldDefinition {
+        description: None,
+        name: Name {
+            src: "__schema".into(),
+            loc: None,
+        },
+        arguments: ArgumentsDefinition {
+            input_values: Arc::new(Vec::new()),
+            loc: None,
+        },
+        ty: Type::NonNull {
+            ty: Box::new(Type::Named {
+                name: "__Schema".into(),
+                loc: None,
+            }),
+            loc: None,
+        },
+        directives: Arc::new(Vec::new()),
+        loc: None,
+    }
+}
+
+fn typename_field() -> FieldDefinition {
+    FieldDefinition {
+        description: None,
+        name: Name {
+            src: "__typename".into(),
+            loc: None,
+        },
+        arguments: ArgumentsDefinition {
+            input_values: Arc::new(Vec::new()),
+            loc: None,
+        },
+        ty: Type::NonNull {
+            ty: Box::new(Type::Named {
+                name: "String".into(),
+                loc: None,
+            }),
+            loc: None,
+        },
+        directives: Arc::new(Vec::new()),
+        loc: None,
+    }
 }
 
 fn implements_interfaces(
@@ -974,7 +1201,7 @@ fn field_definition(field: ast::FieldDefinition, file_id: FileId) -> Option<Fiel
         arguments,
         ty,
         directives,
-        loc,
+        loc: Some(loc),
     })
 }
 
@@ -1048,8 +1275,8 @@ fn default_value(
 fn root_operation_type_definition(
     root_type_def: AstChildren<ast::RootOperationTypeDefinition>,
     file_id: FileId,
-) -> Arc<Vec<RootOperationTypeDefinition>> {
-    let type_defs: Vec<RootOperationTypeDefinition> = root_type_def
+) -> Vec<RootOperationTypeDefinition> {
+    root_type_def
         .into_iter()
         .filter_map(|ty| {
             if let Some(named_ty) = ty.named_type() {
@@ -1066,9 +1293,7 @@ fn root_operation_type_definition(
                 None
             }
         })
-        .collect();
-
-    Arc::new(type_defs)
+        .collect()
 }
 
 fn operation_type(op_type: Option<ast::OperationType>) -> OperationType {
@@ -1096,7 +1321,6 @@ fn variable_definitions(
         Some(vars) => {
             let variable_definitions = vars
                 .variable_definitions()
-                .into_iter()
                 .filter_map(|v| variable_definition(v, file_id))
                 .collect();
             Arc::new(variable_definitions)
@@ -1171,7 +1395,6 @@ fn directive_locations(
         Some(directive_loc) => {
             let locations: Vec<DirectiveLocation> = directive_loc
                 .directive_locations()
-                .into_iter()
                 .map(|loc| loc.into())
                 .collect();
             Arc::new(locations)
@@ -1185,7 +1408,6 @@ fn directives(directives: Option<ast::Directives>, file_id: FileId) -> Arc<Vec<D
         Some(directives) => {
             let directives = directives
                 .directives()
-                .into_iter()
                 .filter_map(|d| directive(d, file_id))
                 .collect();
             Arc::new(directives)
@@ -1211,7 +1433,6 @@ fn arguments(arguments: Option<ast::Arguments>, file_id: FileId) -> Arc<Vec<Argu
         Some(arguments) => {
             let arguments = arguments
                 .arguments()
-                .into_iter()
                 .filter_map(|a| argument(a, file_id))
                 .collect();
             Arc::new(arguments)
@@ -1269,7 +1490,6 @@ fn selection_set(
     let selection_set = match selections {
         Some(sel) => sel
             .selections()
-            .into_iter()
             .filter_map(|sel| selection(db, sel, parent_obj_ty.as_ref().cloned(), file_id))
             .collect(),
         None => Vec::new(),
@@ -1370,7 +1590,7 @@ fn field(
 fn parent_ty(db: &dyn HirDatabase, field_name: &str, parent_obj: Option<String>) -> Option<String> {
     Some(
         db.find_type_definition_by_name(parent_obj?)?
-            .field(field_name)?
+            .field(db, field_name)?
             .ty()
             .name(),
     )
@@ -1406,243 +1626,4 @@ fn alias(alias: Option<ast::Alias>) -> Option<Arc<Alias>> {
 
 fn location(file_id: FileId, syntax_node: &SyntaxNode) -> HirNodeLocation {
     HirNodeLocation::new(file_id, syntax_node)
-}
-
-// Add `Int`, `Float`, `String`, `Boolean`, and `ID`
-fn built_in_scalars(
-    mut scalars: IndexMap<String, Arc<ScalarTypeDefinition>>,
-) -> IndexMap<String, Arc<ScalarTypeDefinition>> {
-    for built_in in [
-        int_scalar(),
-        float_scalar(),
-        string_scalar(),
-        boolean_scalar(),
-        id_scalar(),
-    ] {
-        scalars
-            .entry(built_in.name().to_owned())
-            .or_insert_with(|| Arc::new(built_in));
-    }
-    scalars
-}
-
-fn int_scalar() -> ScalarTypeDefinition {
-    ScalarTypeDefinition {
-        description: Some("The `Int` scalar type represents non-fractional signed whole numeric values. Int can represent values between -(2^31) and 2^31 - 1.".into()),
-        name: "Int".to_string().into(),
-        directives: Arc::new(Vec::new()),
-        loc: None,
-        built_in: true,
-        extensions: Vec::new(),
-    }
-}
-
-fn float_scalar() -> ScalarTypeDefinition {
-    ScalarTypeDefinition {
-        description: Some("The `Float` scalar type represents signed double-precision fractional values as specified by [IEEE 754](https://en.wikipedia.org/wiki/IEEE_floating_point).".into()),
-        name: "Float".to_string().into(),
-        directives: Arc::new(Vec::new()),
-        loc: None,
-        built_in: true,
-        extensions: Vec::new(),
-    }
-}
-
-fn string_scalar() -> ScalarTypeDefinition {
-    ScalarTypeDefinition {
-        description: Some("The `String` scalar type represents textual data, represented as UTF-8 character sequences. The String type is most often used by GraphQL to represent free-form human-readable text.".into()),
-        name: "String".to_string().into(),
-        directives: Arc::new(Vec::new()),
-        loc: None,
-        built_in: true,
-        extensions: Vec::new(),
-    }
-}
-
-fn boolean_scalar() -> ScalarTypeDefinition {
-    ScalarTypeDefinition {
-        description: Some("The `Boolean` scalar type represents `true` or `false`.".into()),
-        name: "Boolean".to_string().into(),
-        directives: Arc::new(Vec::new()),
-        loc: None,
-        built_in: true,
-        extensions: Vec::new(),
-    }
-}
-
-fn id_scalar() -> ScalarTypeDefinition {
-    ScalarTypeDefinition {
-        description: Some("The `ID` scalar type represents a unique identifier, often used to refetch an object or as key for a cache. The ID type appears in a JSON response as a String; however, it is not intended to be human-readable. When expected as an input type, any string (such as `\"4\"`) or integer (such as `4`) input value will be accepted as an ID.".into()),
-        name: "ID".to_string().into(),
-        directives: Arc::new(Vec::new()),
-        loc: None,
-        built_in: true,
-        extensions: Vec::new(),
-    }
-}
-
-fn built_in_directives(
-    mut directives: IndexMap<String, Arc<DirectiveDefinition>>,
-) -> IndexMap<String, Arc<DirectiveDefinition>> {
-    directives
-        .entry("skip".to_owned())
-        .or_insert_with(|| Arc::new(skip_directive()));
-    directives
-        .entry("specifiedBy".to_owned())
-        .or_insert_with(|| Arc::new(specified_by_directive()));
-    directives
-        .entry("deprecated".to_owned())
-        .or_insert_with(|| Arc::new(deprecated_directive()));
-    directives
-        .entry("include".to_owned())
-        .or_insert_with(|| Arc::new(include_directive()));
-    directives
-}
-
-fn skip_directive() -> DirectiveDefinition {
-    // "Directs the executor to skip this field or fragment when the `if` argument is true."
-    // directive @skip(
-    //   "Skipped when true."
-    //   if: Boolean!
-    // ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
-    DirectiveDefinition {
-        description: Some(
-            "Directs the executor to skip this field or fragment when the `if` argument is true."
-                .into(),
-        ),
-        name: "skip".to_string().into(),
-        arguments: ArgumentsDefinition {
-            input_values: Arc::new(vec![InputValueDefinition {
-                description: Some("Skipped when true.".into()),
-                name: "if".to_string().into(),
-                ty: Type::NonNull {
-                    ty: Box::new(Type::Named {
-                        name: "Boolean".into(),
-                        loc: None,
-                    }),
-                    loc: None,
-                },
-                default_value: None,
-                directives: Arc::new(Vec::new()),
-                loc: None,
-            }]),
-            loc: None,
-        },
-        repeatable: false,
-        directive_locations: Arc::new(vec![
-            DirectiveLocation::Field,
-            DirectiveLocation::FragmentSpread,
-            DirectiveLocation::InlineFragment,
-        ]),
-        loc: None,
-    }
-}
-
-fn specified_by_directive() -> DirectiveDefinition {
-    // "Exposes a URL that specifies the behaviour of this scalar."
-    // directive @specifiedBy(
-    //     "The URL that specifies the behaviour of this scalar."
-    //     url: String!
-    // ) on SCALAR
-    DirectiveDefinition {
-        description: Some("Exposes a URL that specifies the behaviour of this scalar.".into()),
-        name: "specifiedBy".to_string().into(),
-        arguments: ArgumentsDefinition {
-            input_values: Arc::new(vec![InputValueDefinition {
-                description: Some("The URL that specifies the behaviour of this scalar.".into()),
-                name: "url".to_string().into(),
-                ty: Type::NonNull {
-                    ty: Box::new(Type::Named {
-                        name: "String".into(),
-                        loc: None,
-                    }),
-                    loc: None,
-                },
-                default_value: None,
-                directives: Arc::new(Vec::new()),
-                loc: None,
-            }]),
-            loc: None,
-        },
-        repeatable: false,
-        directive_locations: Arc::new(vec![DirectiveLocation::Scalar]),
-        loc: None,
-    }
-}
-
-fn deprecated_directive() -> DirectiveDefinition {
-    // "Marks an element of a GraphQL schema as no longer supported."
-    // directive @deprecated(
-    //   """
-    //   Explains why this element was deprecated, usually also including a
-    //   suggestion for how to access supported similar data. Formatted using
-    //   the Markdown syntax, as specified by
-    //   [CommonMark](https://commonmark.org/).
-    //   """
-    //   reason: String = "No longer supported"
-    // ) on FIELD_DEFINITION | ENUM_VALUE
-    DirectiveDefinition {
-        description: Some("Marks an element of a GraphQL schema as no longer supported.".into()),
-        name: "deprecated".to_string().into(),
-        arguments: ArgumentsDefinition {
-            input_values: Arc::new(vec![InputValueDefinition {
-                description: Some(
-                                 "Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).".into(),
-                                 ),
-                                 name: "reason".to_string().into(),
-                                 ty: Type::Named {
-                                     name: "String".into(),
-                                     loc: None,
-                                 },
-                                 default_value: Some(DefaultValue::String("No longer supported".into())),
-                                 directives: Arc::new(Vec::new()),
-                                 loc: None
-            }]),
-            loc: None
-        },
-        repeatable: false,
-        directive_locations: Arc::new(vec![
-                                      DirectiveLocation::FieldDefinition,
-                                      DirectiveLocation::EnumValue
-        ]),
-        loc: None
-    }
-}
-
-fn include_directive() -> DirectiveDefinition {
-    // "Directs the executor to include this field or fragment only when the `if` argument is true."
-    // directive @include(
-    //   "Included when true."
-    //   if: Boolean!
-    // ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
-    DirectiveDefinition {
-        description: Some("Directs the executor to include this field or fragment only when the `if` argument is true.".into()),
-        name: "include".to_string().into(),
-        arguments: ArgumentsDefinition {
-            input_values: Arc::new(vec![InputValueDefinition {
-                description: Some(
-                                 "Included when true.".into(),
-                                 ),
-                                 name: "if".to_string().into(),
-                                 ty: Type::NonNull {
-                                     ty: Box::new(Type::Named {
-                                         name: "Boolean".into(),
-                                         loc: None,
-                                     }),
-                                     loc: None,
-                                 },
-                                 default_value: None,
-                                 directives: Arc::new(Vec::new()),
-                                 loc: None
-            }]),
-            loc: None
-        },
-        repeatable: false,
-        directive_locations: Arc::new(vec![
-                                      DirectiveLocation::Field,
-                                      DirectiveLocation::FragmentSpread,
-                                      DirectiveLocation::InlineFragment,
-        ]),
-        loc: None
-    }
 }

@@ -14,7 +14,7 @@ struct UnknownFileError;
 /// Use [`InputDatabase::source_cache`] to construct one.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SourceCache {
-    sources: Arc<HashMap<FileId, Arc<AriadneSource>>>,
+    sources: HashMap<FileId, Arc<AriadneSource>>,
     paths: HashMap<FileId, PathBuf>,
 }
 impl AriadneCache<FileId> for &SourceCache {
@@ -45,7 +45,11 @@ impl AriadneCache<FileId> for &SourceCache {
 impl std::fmt::Debug for SourceCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_map()
-            .entries(self.paths.iter().map(|(id, path)| (id.as_u64(), path)))
+            .entries({
+                let mut paths: Vec<_> = self.paths.iter().collect();
+                paths.sort_by(|a, b| a.0.cmp(b.0));
+                paths.into_iter().map(|(id, path)| (id.as_u64(), path))
+            })
             .finish()
     }
 }
@@ -64,26 +68,36 @@ pub trait InputDatabase {
     fn input(&self, file_id: FileId) -> Source;
 
     /// Get the GraphQL source text for a file.
+    #[salsa::invoke(source_code)]
     fn source_code(&self, file_id: FileId) -> Arc<str>;
 
     /// Get the source type (document/schema/executable) for a file.
+    #[salsa::invoke(source_type)]
     fn source_type(&self, file_id: FileId) -> SourceType;
 
     /// Get all file ids currently in the compiler.
     #[salsa::input]
     fn source_files(&self) -> Vec<FileId>;
 
+    /// Find source file by file name.
+    fn source_file(&self, path: PathBuf) -> Option<FileId>;
+
     /// Get the GraphQL source text for a file, split up into lines for
     /// printing diagnostics.
+    #[salsa::invoke(source_with_lines)]
     fn source_with_lines(&self, file_id: FileId) -> Arc<AriadneSource>;
+
     /// Get all GraphQL sources known to the compiler, split up into lines
     /// for printing diagnostics.
-    fn source_cache(&self) -> SourceCache;
+    #[salsa::invoke(source_cache)]
+    fn source_cache(&self) -> Arc<SourceCache>;
 
     /// Get all type system definition (GraphQL schema) files.
+    #[salsa::invoke(type_definition_files)]
     fn type_definition_files(&self) -> Vec<FileId>;
 
     /// Get all executable definition (GraphQL query) files.
+    #[salsa::invoke(executable_definition_files)]
     fn executable_definition_files(&self) -> Vec<FileId>;
 }
 
@@ -97,6 +111,13 @@ fn source_code(db: &dyn InputDatabase, file_id: FileId) -> Arc<str> {
     db.input(file_id).text()
 }
 
+fn source_file(db: &dyn InputDatabase, path: PathBuf) -> Option<FileId> {
+    db.source_files()
+        .iter()
+        .find(|id| db.input(**id).filename() == path)
+        .copied()
+}
+
 fn source_type(db: &dyn InputDatabase, file_id: FileId) -> SourceType {
     db.input(file_id).source_type()
 }
@@ -106,7 +127,7 @@ fn source_with_lines(db: &dyn InputDatabase, file_id: FileId) -> Arc<AriadneSour
     Arc::new(AriadneSource::from(code))
 }
 
-fn source_cache(db: &dyn InputDatabase) -> SourceCache {
+fn source_cache(db: &dyn InputDatabase) -> Arc<SourceCache> {
     let file_ids = db.source_files();
     let sources = file_ids
         .iter()
@@ -116,10 +137,7 @@ fn source_cache(db: &dyn InputDatabase) -> SourceCache {
         .iter()
         .map(|&id| (id, db.input(id).filename().to_owned()))
         .collect();
-    SourceCache {
-        sources: Arc::new(sources),
-        paths,
-    }
+    Arc::new(SourceCache { sources, paths })
 }
 
 fn type_definition_files(db: &dyn InputDatabase) -> Vec<FileId> {
@@ -128,7 +146,7 @@ fn type_definition_files(db: &dyn InputDatabase) -> Vec<FileId> {
         .filter(|source| {
             matches!(
                 db.source_type(*source),
-                SourceType::Schema | SourceType::Document
+                SourceType::Schema | SourceType::Document | SourceType::BuiltIn
             )
         })
         .collect()

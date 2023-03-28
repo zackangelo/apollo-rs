@@ -103,6 +103,20 @@ impl ApolloCompiler {
         file_id
     }
 
+    // This adds the introspection type system and any built-in graphql types.
+    fn add_implicit_types(&mut self) {
+        let f_name = "built_in_types.graphql";
+        if self.db.source_file(f_name.into()).is_none() {
+            let file_id = 0.into();
+            let mut sources = self.db.source_files();
+            sources.push(file_id);
+            let implicit_tys = include_str!("built_in_types.graphql");
+            self.db
+                .set_input(file_id, Source::built_in(f_name.into(), implicit_tys));
+            self.db.set_source_files(sources);
+        }
+    }
+
     /// Add a document with executable _and_ type system definitions and
     /// extensions to the compiler.
     ///
@@ -119,6 +133,7 @@ impl ApolloCompiler {
             )
         }
         let filename = path.as_ref().to_owned();
+        self.add_implicit_types();
         self.add_input(Source::document(filename, input))
     }
 
@@ -137,6 +152,7 @@ impl ApolloCompiler {
             )
         }
         let filename = path.as_ref().to_owned();
+        self.add_implicit_types();
         self.add_input(Source::schema(filename, input))
     }
 
@@ -253,6 +269,7 @@ query ExampleQuery {
         let mut compiler = ApolloCompiler::new();
         compiler.add_document(schema, "schema.graphql");
         compiler.add_executable(query, "query.graphql");
+        dbg!(compiler.db.source_files());
     }
 
     #[test]
@@ -574,7 +591,7 @@ scalar URL @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
 "#;
 
         let product_query = r#"query getProduct { topProducts { type } }"#;
-        let customer_query = r#"{ customer }"#;
+        let customer_query = r#"{ customer { id } }"#;
         let colliding_query = r#"query getProduct { topProducts { type, price } }"#;
 
         let mut compiler = ApolloCompiler::new();
@@ -716,7 +733,7 @@ scalar URL @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
         let scalars = compiler.db.scalars();
 
         let directives: Vec<&str> = scalars["URL"]
-            .directives()
+            .self_directives()
             .iter()
             .map(|directive| directive.name())
             .collect();
@@ -748,7 +765,7 @@ enum Pet {
 
         let enums = compiler.db.enums();
         let enum_values: Vec<&str> = enums["Pet"]
-            .enum_values_definition()
+            .self_values()
             .iter()
             .map(|enum_val| enum_val.enum_value())
             .collect();
@@ -790,14 +807,14 @@ type SearchQuery {
 
         let unions = compiler.db.unions();
         let union_members: Vec<&str> = unions["SearchResult"]
-            .union_members()
+            .self_members()
             .iter()
             .map(|member| member.name())
             .collect();
         assert_eq!(union_members, ["Photo", "Person"]);
 
         let photo_object = unions["SearchResult"]
-            .union_members()
+            .self_members()
             .iter()
             .find(|mem| mem.name() == "Person")
             .unwrap()
@@ -805,7 +822,7 @@ type SearchQuery {
 
         if let Some(photo) = photo_object {
             let fields: Vec<&str> = photo
-                .fields_definition()
+                .self_fields()
                 .iter()
                 .map(|field| field.name())
                 .collect();
@@ -873,7 +890,7 @@ input Point2D {
 
         let input_objects = compiler.db.input_objects();
         let fields: Vec<&str> = input_objects["Point2D"]
-            .input_fields_definition()
+            .self_fields()
             .iter()
             .map(|val| val.name())
             .collect();
@@ -907,7 +924,11 @@ directive @directiveB(name: String) on OBJECT | INTERFACE
             .find_object_type_by_name("Book".to_string())
             .unwrap();
 
-        let directive_names: Vec<&str> = book_obj.directives().iter().map(|d| d.name()).collect();
+        let directive_names: Vec<&str> = book_obj
+            .self_directives()
+            .iter()
+            .map(|d| d.name())
+            .collect();
         assert_eq!(directive_names, ["directiveA", "directiveB"]);
     }
 
@@ -940,7 +961,7 @@ scalar Url @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
 
         if let Some(person) = person_obj {
             let field_ty_directive: Vec<String> = person
-                .fields_definition()
+                .self_fields()
                 .iter()
                 .filter_map(|f| {
                     // get access to the actual definition the field is using
@@ -949,7 +970,7 @@ scalar Url @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
                             // get that definition's directives, for example
                             TypeDefinition::ScalarTypeDefinition(scalar) => {
                                 let dir_names: Vec<String> = scalar
-                                    .directives()
+                                    .self_directives()
                                     .iter()
                                     .map(|dir| dir.name().to_owned())
                                     .collect();
@@ -965,7 +986,7 @@ scalar Url @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
             assert_eq!(field_ty_directive, ["specifiedBy"]);
 
             let field_arg_ty_vals: Vec<String> = person
-                .fields_definition()
+                .self_fields()
                 .iter()
                 .flat_map(|f| {
                     let enum_vals: Vec<String> = f
@@ -978,7 +999,7 @@ scalar Url @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
                                     // get that definition's directives, for example
                                     TypeDefinition::EnumTypeDefinition(enum_) => {
                                         let dir_names: Vec<String> = enum_
-                                            .enum_values_definition()
+                                            .self_values()
                                             .iter()
                                             .map(|enum_val| enum_val.enum_value().to_owned())
                                             .collect();
@@ -1022,14 +1043,14 @@ scalar Url @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
 
         if let Some(person) = person_obj {
             let field_ty_directive: Vec<String> = person
-                .input_fields_definition()
+                .self_fields()
                 .iter()
                 .filter_map(|f| {
                     if let Some(field_ty) = f.ty().type_def(&compiler.db) {
                         match field_ty {
                             TypeDefinition::ScalarTypeDefinition(scalar) => {
                                 let dir_names: Vec<String> = scalar
-                                    .directives()
+                                    .self_directives()
                                     .iter()
                                     .map(|dir| dir.name().to_owned())
                                     .collect();
@@ -1189,7 +1210,7 @@ type Query {
             .db
             .find_object_type_by_name("Query".into())
             .unwrap();
-        assert!(object_type.directives().is_empty());
+        assert!(object_type.self_directives().is_empty());
 
         let input = r#"
 type Query @withDirective {
@@ -1203,7 +1224,7 @@ type Query @withDirective {
             .db
             .find_object_type_by_name("Query".into())
             .unwrap();
-        assert_eq!(object_type.directives().len(), 1);
+        assert_eq!(object_type.self_directives().len(), 1);
     }
 
     #[test]

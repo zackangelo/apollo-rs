@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt,
+    fmt, hash,
     sync::Arc,
 };
 
@@ -84,6 +84,17 @@ impl TypeDefinition {
         }
     }
 
+    /// Returns whether this definition is a composite definition (union, interface, or object).
+    #[must_use]
+    pub fn is_composite_definition(&self) -> bool {
+        matches!(
+            self,
+            Self::ObjectTypeDefinition(_)
+                | Self::InterfaceTypeDefinition(_)
+                | Self::UnionTypeDefinition(_)
+        )
+    }
+
     /// Returns whether this definition is a scalar, object, interface, union, or enum.
     #[must_use]
     pub fn is_output_definition(&self) -> bool {
@@ -112,32 +123,77 @@ impl TypeDefinition {
         )
     }
 
-    pub fn directives(&self) -> &[Directive] {
+    /// Returns directives of this type definition (excluding those on its extensions)
+    pub fn self_directives(&self) -> &[Directive] {
         match self {
-            Self::ScalarTypeDefinition(def) => def.directives(),
-            Self::ObjectTypeDefinition(def) => def.directives(),
-            Self::InterfaceTypeDefinition(def) => def.directives(),
-            Self::UnionTypeDefinition(def) => def.directives(),
-            Self::EnumTypeDefinition(def) => def.directives(),
-            Self::InputObjectTypeDefinition(def) => def.directives(),
+            Self::ScalarTypeDefinition(def) => def.self_directives(),
+            Self::ObjectTypeDefinition(def) => def.self_directives(),
+            Self::InterfaceTypeDefinition(def) => def.self_directives(),
+            Self::UnionTypeDefinition(def) => def.self_directives(),
+            Self::EnumTypeDefinition(def) => def.self_directives(),
+            Self::InputObjectTypeDefinition(def) => def.self_directives(),
         }
     }
 
-    pub fn field(&self, name: &str) -> Option<&FieldDefinition> {
+    /// Returns an iterator of directives on either the type definition or its type extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
         match self {
-            Self::ObjectTypeDefinition(def) => def.field(name),
+            Self::ScalarTypeDefinition(def) => {
+                // Use `Box<dyn _>` since each inner method returns a different iterator type.
+                // https://crates.io/crates/enum_dispatch could be used instead
+                // but is it worth the trouble?
+                Box::new(def.directives()) as Box<dyn Iterator<Item = &Directive>>
+            }
+            Self::ObjectTypeDefinition(def) => Box::new(def.directives()),
+            Self::InterfaceTypeDefinition(def) => Box::new(def.directives()),
+            Self::UnionTypeDefinition(def) => Box::new(def.directives()),
+            Self::EnumTypeDefinition(def) => Box::new(def.directives()),
+            Self::InputObjectTypeDefinition(def) => Box::new(def.directives()),
+        }
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the type definition or its type extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the type definition or its type extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
+    }
+
+    pub fn field(&self, db: &dyn HirDatabase, name: &str) -> Option<&FieldDefinition> {
+        match self {
+            Self::ObjectTypeDefinition(def) => def.field(db, name),
             Self::InterfaceTypeDefinition(def) => def.field(name),
+            Self::UnionTypeDefinition(def) => {
+                def.implicit_fields().iter().find(|f| f.name() == name)
+            }
             _ => None,
         }
     }
 
-    pub fn loc(&self) -> Option<HirNodeLocation> {
+    pub fn loc(&self) -> HirNodeLocation {
         match self {
-            Self::ObjectTypeDefinition(def) => Some(def.loc()),
-            Self::InterfaceTypeDefinition(def) => Some(def.loc()),
-            Self::UnionTypeDefinition(def) => Some(def.loc()),
-            Self::EnumTypeDefinition(def) => Some(def.loc()),
-            Self::InputObjectTypeDefinition(def) => Some(def.loc()),
+            Self::ObjectTypeDefinition(def) => def.loc(),
+            Self::InterfaceTypeDefinition(def) => def.loc(),
+            Self::UnionTypeDefinition(def) => def.loc(),
+            Self::EnumTypeDefinition(def) => def.loc(),
+            Self::InputObjectTypeDefinition(def) => def.loc(),
             Self::ScalarTypeDefinition(def) => def.loc(),
         }
     }
@@ -245,6 +301,25 @@ impl TypeExtension {
         }
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     pub fn field(&self, name: &str) -> Option<&FieldDefinition> {
         match self {
             Self::ObjectTypeExtension(def) => def.field(name),
@@ -300,6 +375,25 @@ impl FragmentDefinition {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get a reference to fragment definition's selection set.
     /// TODO: is this good??
     pub fn selection_set(&self) -> &SelectionSet {
@@ -311,12 +405,10 @@ impl FragmentDefinition {
     // which operation definition the fragment is used in.
 
     /// Get variables used in a fragment definition.
+    ///
+    /// TODO(@goto-bus-stop): Maybe rename this to used_variables
     pub fn variables(&self, db: &dyn HirDatabase) -> Vec<Variable> {
-        self.selection_set
-            .selection()
-            .iter()
-            .flat_map(|sel| sel.variables(db))
-            .collect()
+        self.selection_set.variables(db)
     }
 
     pub fn type_def(&self, db: &dyn HirDatabase) -> Option<TypeDefinition> {
@@ -357,11 +449,13 @@ impl OperationDefinition {
 
     /// Get operation's definition object type.
     pub fn object_type(&self, db: &dyn HirDatabase) -> Option<Arc<ObjectTypeDefinition>> {
-        match self.operation_ty {
-            OperationType::Query => db.schema().query(db),
-            OperationType::Mutation => db.schema().mutation(db),
-            OperationType::Subscription => db.schema().subscription(db),
-        }
+        let schema = db.schema();
+        let name = match self.operation_ty {
+            OperationType::Query => schema.query()?,
+            OperationType::Mutation => schema.mutation()?,
+            OperationType::Subscription => schema.subscription()?,
+        };
+        db.object_types_with_built_ins().get(name).cloned()
     }
 
     /// Get a reference to the operation definition's variables.
@@ -372,6 +466,25 @@ impl OperationDefinition {
     /// Get a mutable reference to the operation definition's directives.
     pub fn directives(&self) -> &[Directive] {
         self.directives.as_ref()
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
     }
 
     /// Get a reference to the operation definition's selection set.
@@ -446,13 +559,19 @@ impl OperationType {
     }
 }
 
+impl From<OperationType> for &'static str {
+    fn from(ty: OperationType) -> &'static str {
+        match ty {
+            OperationType::Query => "Query",
+            OperationType::Mutation => "Mutation",
+            OperationType::Subscription => "Subscription",
+        }
+    }
+}
+
 impl fmt::Display for OperationType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OperationType::Query => write!(f, "Query"),
-            OperationType::Mutation => write!(f, "Mutation"),
-            OperationType::Subscription => write!(f, "Subscription"),
-        }
+        f.write_str((*self).into())
     }
 }
 
@@ -508,6 +627,25 @@ impl VariableDefinition {
     /// Get a reference to the variable definition's directives.
     pub fn directives(&self) -> &[Directive] {
         self.directives.as_ref()
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
     }
 
     /// Get the AST location information for this HIR node.
@@ -611,6 +749,16 @@ impl Type {
     }
 }
 
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::NonNull { ty, .. } => write!(f, "{ty}!"),
+            Type::List { ty, .. } => write!(f, "[{ty}]"),
+            Type::Named { name, .. } => write!(f, "{name}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Directive {
     pub(crate) name: Name,
@@ -657,7 +805,7 @@ pub struct DirectiveDefinition {
     pub(crate) arguments: ArgumentsDefinition,
     pub(crate) repeatable: bool,
     pub(crate) directive_locations: Arc<Vec<DirectiveLocation>>,
-    pub(crate) loc: Option<HirNodeLocation>,
+    pub(crate) loc: HirNodeLocation,
 }
 
 impl DirectiveDefinition {
@@ -692,8 +840,17 @@ impl DirectiveDefinition {
     }
 
     /// Get the AST location information for this HIR node.
-    pub fn loc(&self) -> Option<HirNodeLocation> {
+    pub fn loc(&self) -> HirNodeLocation {
         self.loc
+    }
+
+    /// Checks if current directive is one of built-in directives - `@skip`,
+    /// `@include`, `@deprecated`, `@specifiedBy`.
+    pub fn is_built_in(&self) -> bool {
+        matches!(
+            self.name(),
+            "skip" | "include" | "deprecated" | "specifiedBy"
+        )
     }
 }
 
@@ -852,6 +1009,31 @@ impl Value {
     #[must_use]
     pub fn is_variable(&self) -> bool {
         matches!(self, Self::Variable(..))
+    }
+
+    /// Returns `true` if `other` represents the same value as `self`. This is different from the
+    /// `Eq` implementation as it ignores location information.
+    pub fn is_same_value(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Value::Variable(left), Value::Variable(right)) => left.name() == right.name(),
+            (Value::Int(left) | Value::Float(left), Value::Int(right) | Value::Float(right)) => {
+                left == right
+            }
+            (Value::String(left), Value::String(right)) => left == right,
+            (Value::Boolean(left), Value::Boolean(right)) => left == right,
+            (Value::Null, Value::Null) => true,
+            (Value::Enum(left), Value::Enum(right)) => left.src() == right.src(),
+            (Value::List(left), Value::List(right)) if left.len() == right.len() => left
+                .iter()
+                .zip(right)
+                .all(|(left, right)| left.is_same_value(right)),
+            (Value::Object(left), Value::Object(right)) if left.len() == right.len() => {
+                left.iter().zip(right).all(|(left, right)| {
+                    left.0.src() == left.0.src() && left.1.is_same_value(&right.1)
+                })
+            }
+            _ => false,
+        }
     }
 }
 
@@ -1016,6 +1198,51 @@ impl SelectionSet {
         })
     }
 
+    /// Get all variables used in this selection set.
+    pub fn variables(&self, db: &dyn HirDatabase) -> Vec<Variable> {
+        /// Recursively collect used variables. Accounts for self-referential fragments.
+        fn collect_used_variables(
+            db: &dyn HirDatabase,
+            set: &SelectionSet,
+            seen_fragments: &mut HashSet<Arc<FragmentDefinition>>,
+            output: &mut Vec<Variable>,
+        ) {
+            for selection in set.selection() {
+                match selection {
+                    Selection::Field(field) => {
+                        output.extend(field.self_used_variables());
+                        collect_used_variables(db, field.selection_set(), seen_fragments, output);
+                    }
+                    Selection::FragmentSpread(spread) => {
+                        output.extend(spread.self_used_variables());
+
+                        let Some(fragment) = spread.fragment(db) else {
+                            return;
+                        };
+                        if seen_fragments.contains(&fragment) {
+                            return; // prevent recursion loop
+                        }
+                        seen_fragments.insert(Arc::clone(&fragment));
+                        collect_used_variables(
+                            db,
+                            fragment.selection_set(),
+                            seen_fragments,
+                            output,
+                        );
+                    }
+                    Selection::InlineFragment(inline) => {
+                        output.extend(inline.self_used_variables());
+                        collect_used_variables(db, inline.selection_set(), seen_fragments, output);
+                    }
+                }
+            }
+        }
+
+        let mut output = vec![];
+        collect_used_variables(db, self, &mut HashSet::new(), &mut output);
+        output
+    }
+
     /// Returns true if all the [`Selection`]s in this selection set are themselves introspections.
     pub fn is_introspection(&self, db: &dyn HirDatabase) -> bool {
         self.selection().iter().all(|selection| match selection {
@@ -1023,6 +1250,21 @@ impl SelectionSet {
             Selection::FragmentSpread(spread) => spread.is_introspection(db),
             Selection::InlineFragment(inline) => inline.is_introspection(db),
         })
+    }
+
+    /// Create a selection set for the concatenation of two selection sets' fields.
+    ///
+    /// This does not deduplicate fields: if the two selection sets both select a field `a`, the
+    /// merged set will select field `a` twice.
+    pub fn merge(&self, other: &SelectionSet) -> SelectionSet {
+        let mut merged: Vec<Selection> =
+            Vec::with_capacity(self.selection.len() + other.selection.len());
+        merged.append(&mut self.selection.as_ref().clone());
+        merged.append(&mut other.selection.as_ref().clone());
+
+        SelectionSet {
+            selection: Arc::new(merged),
+        }
     }
 }
 
@@ -1065,6 +1307,15 @@ impl Selection {
     pub fn is_inline_fragment(&self) -> bool {
         matches!(self, Self::InlineFragment(..))
     }
+
+    /// Get the AST location information for this HIR node.
+    pub fn loc(&self) -> HirNodeLocation {
+        match self {
+            Selection::Field(field) => field.loc(),
+            Selection::FragmentSpread(fragment_spread) => fragment_spread.loc(),
+            Selection::InlineFragment(inline_fragment) => inline_fragment.loc(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -1087,35 +1338,56 @@ impl Field {
         }
     }
 
-    /// Get a reference to the field's name.
+    /// Get the field's name, corresponding to the definition it looks up.
+    ///
+    /// For example, in this operation, the `.name()` is "sourceField":
+    /// ```graphql
+    /// query GetField { alias: sourceField }
+    /// ```
     pub fn name(&self) -> &str {
         self.name.src()
+    }
+
+    /// Get the name that will be used for this field selection in response formatting.
+    ///
+    /// For example, in this operation, the `.response_name()` is "sourceField":
+    /// ```graphql
+    /// query GetField { sourceField }
+    /// ```
+    ///
+    /// But in this operation that uses an alias, the `.response_name()` is "responseField":
+    /// ```graphql
+    /// query GetField { responseField: sourceField }
+    /// ```
+    pub fn response_name(&self) -> &str {
+        self.alias().map(Alias::name).unwrap_or_else(|| self.name())
     }
 
     /// Get a reference to field's type.
     pub fn ty(&self, db: &dyn HirDatabase) -> Option<Type> {
         let def = db
             .find_type_definition_by_name(self.parent_obj.as_ref()?.to_string())?
-            .field(self.name())?
+            .field(db, self.name())?
             .ty()
             .to_owned();
         Some(def)
+    }
+
+    /// Get the field's parent type definition.
+    pub fn parent_type(&self, db: &dyn HirDatabase) -> Option<TypeDefinition> {
+        db.find_type_definition_by_name(self.parent_obj.as_ref()?.to_string())
     }
 
     /// Get field's original field definition.
     pub fn field_definition(&self, db: &dyn HirDatabase) -> Option<FieldDefinition> {
         let type_name = self.parent_obj.as_ref()?.to_string();
         let type_def = db.find_type_definition_by_name(type_name)?;
-        let field_defs = match type_def {
-            TypeDefinition::ObjectTypeDefinition(ref obj) => Some(obj.fields_definition()),
-            TypeDefinition::InterfaceTypeDefinition(ref iface) => Some(iface.fields_definition()),
-            _ => None,
-        }?;
 
-        field_defs
-            .iter()
-            .find(|field| field.name() == self.name())
-            .cloned()
+        match type_def {
+            TypeDefinition::ObjectTypeDefinition(obj) => obj.field(db, self.name()).cloned(),
+            TypeDefinition::InterfaceTypeDefinition(iface) => iface.field(self.name()).cloned(),
+            _ => None,
+        }
     }
 
     /// Get a reference to the field's arguments.
@@ -1128,27 +1400,59 @@ impl Field {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get a reference to the field's selection set.
     pub fn selection_set(&self) -> &SelectionSet {
         &self.selection_set
     }
 
-    /// Get variables used in the field.
-    pub fn variables(&self, db: &dyn HirDatabase) -> Vec<Variable> {
-        let mut vars: Vec<_> = self
-            .arguments
+    /// Return an iterator over the variables used in arguments to this field and its directives.
+    fn self_used_variables(&self) -> impl Iterator<Item = Variable> + '_ {
+        self.arguments
             .iter()
+            .chain(
+                self.directives()
+                    .iter()
+                    .flat_map(|directive| directive.arguments()),
+            )
             .filter_map(|arg| match arg.value() {
                 Value::Variable(var) => Some(var.clone()),
                 _ => None,
             })
-            .collect();
-        let iter = self
-            .selection_set
-            .selection()
-            .iter()
-            .flat_map(|sel| sel.variables(db));
-        vars.extend(iter);
+    }
+
+    /// Get variables used in the field, including in sub-selections.
+    ///
+    /// For example, with this field:
+    /// ```graphql
+    /// {
+    ///   field(arg: $arg) {
+    ///     number(formatAs: $format)
+    ///   }
+    /// }
+    /// ```
+    /// the used variables are `$arg` and `$format`.
+    pub fn variables(&self, db: &dyn HirDatabase) -> Vec<Variable> {
+        let mut vars = self.self_used_variables().collect::<Vec<_>>();
+        vars.extend(self.selection_set.variables(db));
         vars
     }
 
@@ -1157,7 +1461,8 @@ impl Field {
         self.loc
     }
 
-    /// returns true if this is an introspection field (i.e. it's [`Self::name()`] is one of __type, or __schema).
+    /// Returns true if this is an introspection field (i.e. it's
+    /// [`Self::name()`] is one of __type, or __schema).
     pub fn is_introspection(&self) -> bool {
         let field_name = self.name();
         field_name == "__type" || field_name == "__schema" || field_name == "__typename"
@@ -1183,20 +1488,47 @@ impl InlineFragment {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get a reference inline fragment's selection set.
     pub fn selection_set(&self) -> &SelectionSet {
         &self.selection_set
     }
 
+    /// Return an iterator over the variables used in directives on this spread.
+    ///
+    /// Variables used *inside* the fragment are not included. For that, use
+    /// [`variables()`][Self::variables].
+    pub fn self_used_variables(&self) -> impl Iterator<Item = Variable> + '_ {
+        self.directives()
+            .iter()
+            .flat_map(Directive::arguments)
+            .filter_map(|arg| match arg.value() {
+                Value::Variable(var) => Some(var.clone()),
+                _ => None,
+            })
+    }
+
     /// Get variables in use in the inline fragment.
     pub fn variables(&self, db: &dyn HirDatabase) -> Vec<Variable> {
-        let vars = self
-            .selection_set
-            .selection()
-            .iter()
-            .flat_map(|sel| sel.variables(db))
-            .collect();
-        vars
+        self.selection_set.variables(db)
     }
 
     /// Get the AST location information for this HIR node.
@@ -1228,18 +1560,25 @@ impl FragmentSpread {
         db.find_fragment_by_name(self.loc.file_id(), self.name().to_string())
     }
 
+    /// Return an iterator over the variables used in directives on this spread.
+    ///
+    /// Variables used by the fragment definition are not included. For that, use
+    /// [`variables()`][Self::variables].
+    pub fn self_used_variables(&self) -> impl Iterator<Item = Variable> + '_ {
+        self.directives()
+            .iter()
+            .flat_map(Directive::arguments)
+            .filter_map(|arg| match arg.value() {
+                Value::Variable(var) => Some(var.clone()),
+                _ => None,
+            })
+    }
+
     /// Get fragment spread's defined variables.
     pub fn variables(&self, db: &dyn HirDatabase) -> Vec<Variable> {
-        let vars = match self.fragment(db) {
-            Some(fragment) => fragment
-                .selection_set
-                .selection()
-                .iter()
-                .flat_map(|sel| sel.variables(db))
-                .collect(),
-            None => Vec::new(),
-        };
-        vars
+        self.fragment(db)
+            .map(|fragment| fragment.variables(db))
+            .unwrap_or_default()
     }
 
     /// Get a reference to fragment spread directives.
@@ -1247,12 +1586,32 @@ impl FragmentSpread {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get the AST location information for this HIR node.
     pub fn loc(&self) -> HirNodeLocation {
         self.loc
     }
 
-    /// Returns true if the fragment referenced by this spread exists and its [`SelectionSet`] is an introspection.
+    /// Returns true if the fragment referenced by this spread exists and its
+    /// [`SelectionSet`] is an introspection.
     pub fn is_introspection(&self, db: &dyn HirDatabase) -> bool {
         let maybe_fragment = self.fragment(db);
         maybe_fragment.map_or(false, |fragment| {
@@ -1263,6 +1622,11 @@ impl FragmentSpread {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Alias(pub String);
+impl Alias {
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Float {
@@ -1295,6 +1659,91 @@ impl Float {
     }
 }
 
+/// This pre-computes where to find items such as fields of an object type on a
+/// type extension based on the item's name.
+#[derive(Clone, Debug, Eq)]
+pub(crate) struct ByNameWithExtensions {
+    /// `(None, i)` designates `def.example[i]`.
+    /// `(Some(j), i)` designates `def.extensions[j].example[i]`.
+    indices: IndexMap<String, (Option<usize>, usize)>,
+}
+
+/// Equivalent to ignoring a `ByNameWithExtensions` field in `PartialEq` for its parent struct,
+/// since it is determined by other fields.
+impl PartialEq for ByNameWithExtensions {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+/// Equivalent to ignoring a `ByNameWithExtensions` field in `Hash` for its parent struct,
+/// since it is determined by other fields.
+impl hash::Hash for ByNameWithExtensions {
+    fn hash<H: hash::Hasher>(&self, _state: &mut H) {
+        // do nothing
+    }
+}
+
+impl ByNameWithExtensions {
+    pub(crate) fn new<Item>(self_items: &[Item], name: impl Fn(&Item) -> &str) -> Self {
+        let mut indices = IndexMap::new();
+        for (i, item) in self_items.iter().enumerate() {
+            indices.entry(name(item).to_owned()).or_insert((None, i));
+        }
+        ByNameWithExtensions { indices }
+    }
+
+    pub(crate) fn add_extension<Item>(
+        &mut self,
+        extension_index: usize,
+        extension_items: &[Item],
+        name: impl Fn(&Item) -> &str,
+    ) {
+        for (i, item) in extension_items.iter().enumerate() {
+            self.indices
+                .entry(name(item).to_owned())
+                .or_insert((Some(extension_index), i));
+        }
+    }
+
+    fn get_by_index<'a, Item, Ext>(
+        &self,
+        (ext, i): (Option<usize>, usize),
+        self_items: &'a [Item],
+        extensions: &'a [Arc<Ext>],
+        extension_items: impl Fn(&'a Ext) -> &'a [Item],
+    ) -> &'a Item {
+        let items = if let Some(j) = ext {
+            extension_items(&extensions[j])
+        } else {
+            self_items
+        };
+        &items[i]
+    }
+
+    pub(crate) fn get<'a, Item, Ext>(
+        &self,
+        name: &str,
+        self_items: &'a [Item],
+        extensions: &'a [Arc<Ext>],
+        extension_items: impl Fn(&'a Ext) -> &'a [Item],
+    ) -> Option<&'a Item> {
+        let index = *self.indices.get(name)?;
+        Some(self.get_by_index(index, self_items, extensions, extension_items))
+    }
+
+    pub(crate) fn iter<'a, Item, Ext>(
+        &'a self,
+        self_items: &'a [Item],
+        extensions: &'a [Arc<Ext>],
+        extension_items: impl Fn(&'a Ext) -> &'a [Item] + Copy + 'a,
+    ) -> impl Iterator<Item = &'a Item> + ExactSizeIterator + DoubleEndedIterator {
+        self.indices
+            .values()
+            .map(move |&index| self.get_by_index(index, self_items, extensions, extension_items))
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Default, Eq)]
 pub struct SchemaDefinition {
     pub(crate) description: Option<String>,
@@ -1302,24 +1751,70 @@ pub struct SchemaDefinition {
     pub(crate) root_operation_type_definition: Arc<Vec<RootOperationTypeDefinition>>,
     pub(crate) loc: Option<HirNodeLocation>,
     pub(crate) extensions: Vec<Arc<SchemaExtension>>,
+    pub(crate) root_operation_names: RootOperationNames,
+}
+
+#[derive(Default, Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct RootOperationNames {
+    pub(crate) query: Option<String>,
+    pub(crate) mutation: Option<String>,
+    pub(crate) subscription: Option<String>,
 }
 
 impl SchemaDefinition {
-    /// Get a reference to the schema definition's directives.
-    pub fn directives(&self) -> &[Directive] {
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    /// Get a reference to the schema definition's directives (excluding those on extensions).
+    pub fn self_directives(&self) -> &[Directive] {
         self.directives.as_ref()
     }
 
-    /// Get a reference to the schema definition's root operation type definition.
-    pub fn root_operation_type_definition(&self) -> &[RootOperationTypeDefinition] {
+    /// Returns an iterator of directives on either the `schema` definition or its extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
+        self.self_directives()
+            .iter()
+            .chain(self.extensions.iter().flat_map(|ext| ext.directives()))
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
+    }
+
+    /// Returns the root operations from this schema definition,
+    /// excluding those from schema extensions.
+    pub fn self_root_operations(&self) -> &[RootOperationTypeDefinition] {
         self.root_operation_type_definition.as_ref()
     }
 
-    /// Set the schema definition's root operation type definition.
-    pub(crate) fn set_root_operation_type_definition(&mut self, op: RootOperationTypeDefinition) {
-        Arc::get_mut(&mut self.root_operation_type_definition)
-            .unwrap()
-            .push(op)
+    /// Returns an iterator of root operations, from either on this schema defintion or its extensions.
+    pub fn root_operations(&self) -> impl Iterator<Item = &RootOperationTypeDefinition> {
+        self.self_root_operations().iter().chain(
+            self.extensions()
+                .iter()
+                .flat_map(|ext| ext.root_operations()),
+        )
     }
 
     /// Get the AST location information for this HIR node.
@@ -1332,40 +1827,31 @@ impl SchemaDefinition {
         &self.extensions
     }
 
-    // NOTE(@lrlna): potentially have the following fns on the database itself
-    // so they are memoised as well
-
-    /// Get Schema's query object type definition.
-    pub fn query(&self, db: &dyn HirDatabase) -> Option<Arc<ObjectTypeDefinition>> {
-        self.root_operation_type_definition().iter().find_map(|op| {
-            if op.operation_ty.is_query() {
-                op.object_type(db)
-            } else {
-                None
-            }
-        })
+    /// Returns the name of the object type for the `query` root operation,
+    /// defined either on this schema defintion or its extensions.
+    ///
+    /// The corresponding object type definition can be found
+    /// at [`compiler.db.object_types().get(name)`][HirDatabase::object_types].
+    pub fn query(&self) -> Option<&str> {
+        self.root_operation_names.query.as_deref()
     }
 
-    /// Get Schema's mutation object type definition.
-    pub fn mutation(&self, db: &dyn HirDatabase) -> Option<Arc<ObjectTypeDefinition>> {
-        self.root_operation_type_definition().iter().find_map(|op| {
-            if op.operation_ty.is_mutation() {
-                op.object_type(db)
-            } else {
-                None
-            }
-        })
+    /// Returns the name of the object type for the `mutation` root operation,
+    /// defined either on this schema defintion or its extensions.
+    ///
+    /// The corresponding object type definition can be found
+    /// at [`compiler.db.object_types().get(name)`][HirDatabase::object_types].
+    pub fn mutation(&self) -> Option<&str> {
+        self.root_operation_names.mutation.as_deref()
     }
 
-    /// Get Schema's subscription object type definition.
-    pub fn subscription(&self, db: &dyn HirDatabase) -> Option<Arc<ObjectTypeDefinition>> {
-        self.root_operation_type_definition().iter().find_map(|op| {
-            if op.operation_ty.is_subscription() {
-                op.object_type(db)
-            } else {
-                None
-            }
-        })
+    /// Returns the name of the object type for the `subscription` root operation,
+    /// defined either on this schema defintion or its extensions.
+    ///
+    /// The corresponding object type definition can be found
+    /// at [`compiler.db.object_types().get(name)`][HirDatabase::object_types].
+    pub fn subscription(&self) -> Option<&str> {
+        self.root_operation_names.subscription.as_deref()
     }
 }
 
@@ -1420,6 +1906,10 @@ pub struct ObjectTypeDefinition {
     pub(crate) fields_definition: Arc<Vec<FieldDefinition>>,
     pub(crate) loc: HirNodeLocation,
     pub(crate) extensions: Vec<Arc<ObjectTypeExtension>>,
+    pub(crate) fields_by_name: ByNameWithExtensions,
+    pub(crate) implements_interfaces_by_name: ByNameWithExtensions,
+    pub(crate) is_introspection: bool,
+    pub(crate) implicit_fields: Arc<Vec<FieldDefinition>>,
 }
 
 impl ObjectTypeDefinition {
@@ -1438,24 +1928,101 @@ impl ObjectTypeDefinition {
         self.description.as_deref()
     }
 
-    /// Get a reference to the object type definition's directives.
-    pub fn directives(&self) -> &[Directive] {
+    /// Get a reference to the object type definition's directives (excluding those on extensions).
+    pub fn self_directives(&self) -> &[Directive] {
         self.directives.as_ref()
     }
 
-    /// Get a reference to the object type definition's field definitions.
-    pub fn fields_definition(&self) -> &[FieldDefinition] {
+    /// Returns an iterator of directives on either the type definition or its type extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
+        self.self_directives()
+            .iter()
+            .chain(self.extensions.iter().flat_map(|ext| ext.directives()))
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
+    }
+
+    /// Get a reference to the object type definition's field definitions,
+    /// excluding fields from extensions.
+    pub fn self_fields(&self) -> &[FieldDefinition] {
         self.fields_definition.as_ref()
     }
 
-    /// Find a field in object type definition.
-    pub fn field(&self, name: &str) -> Option<&FieldDefinition> {
-        self.fields_definition().iter().find(|f| f.name() == name)
+    /// Returns an iterator of fields of this object type,
+    /// whether from its own definition or from extensions.
+    pub fn fields(
+        &self,
+    ) -> impl Iterator<Item = &FieldDefinition> + ExactSizeIterator + DoubleEndedIterator {
+        self.fields_by_name.iter(
+            self.self_fields(),
+            self.extensions(),
+            ObjectTypeExtension::fields_definition,
+        )
     }
 
-    /// Get a reference to object type definition's implements interfaces vector.
-    pub fn implements_interfaces(&self) -> &[ImplementsInterface] {
+    /// Find a field by its name, either in this object type definition or its extensions.
+    pub fn field(&self, db: &dyn HirDatabase, name: &str) -> Option<&FieldDefinition> {
+        self.fields_by_name
+            .get(
+                name,
+                self.self_fields(),
+                self.extensions(),
+                ObjectTypeExtension::fields_definition,
+            )
+            .or_else(|| self.implicit_fields(db).iter().find(|f| f.name() == name))
+    }
+
+    /// Returns interfaces implemented by this object type definition,
+    /// excluding those from extensions.
+    pub fn self_implements_interfaces(&self) -> &[ImplementsInterface] {
         self.implements_interfaces.as_ref()
+    }
+
+    /// Returns an iterator of interfaces implemented by this object type,
+    /// whether from its own definition or from extensions.
+    pub fn implements_interfaces(
+        &self,
+    ) -> impl Iterator<Item = &ImplementsInterface> + ExactSizeIterator + DoubleEndedIterator {
+        self.implements_interfaces_by_name.iter(
+            self.self_implements_interfaces(),
+            self.extensions(),
+            ObjectTypeExtension::implements_interfaces,
+        )
+    }
+
+    /// Returns whether this object type implements the interface of the given name,
+    /// either in its own definition or its extensions.
+    pub fn implements_interface(&self, name: &str) -> bool {
+        self.implements_interfaces_by_name
+            .get(
+                name,
+                self.self_implements_interfaces(),
+                self.extensions(),
+                ObjectTypeExtension::implements_interfaces,
+            )
+            .is_some()
     }
 
     /// Get the AST location information for this HIR node.
@@ -1466,6 +2033,48 @@ impl ObjectTypeDefinition {
     /// Extensions that apply to this definition
     pub fn extensions(&self) -> &[Arc<ObjectTypeExtension>] {
         &self.extensions
+    }
+
+    pub(crate) fn push_extension(&mut self, ext: Arc<ObjectTypeExtension>) {
+        let next_index = self.extensions.len();
+        self.fields_by_name.add_extension(
+            next_index,
+            ext.fields_definition(),
+            FieldDefinition::name,
+        );
+        self.implements_interfaces_by_name.add_extension(
+            next_index,
+            ext.implements_interfaces(),
+            ImplementsInterface::interface,
+        );
+        self.extensions.push(ext);
+    }
+
+    /// Returns `true` if this Object Type Definition is one of the
+    /// introspection types:
+    ///
+    /// `__Schema`, `__Type`, `__Field`, `__InputValue`,
+    /// `__EnumValue`, `__Directive`
+    pub fn is_introspection(&self) -> bool {
+        self.is_introspection
+    }
+
+    pub(crate) fn implicit_fields(&self, db: &dyn HirDatabase) -> &[FieldDefinition] {
+        let is_root_query = db
+            .schema()
+            .root_operations()
+            .any(|op| op.operation_ty().is_query() && op.named_type().name() == self.name());
+        if is_root_query {
+            self.implicit_fields.as_ref()
+        } else {
+            let position = self
+                .implicit_fields
+                .iter()
+                .cloned()
+                .position(|f| f.name() == "__typename")
+                .unwrap();
+            &self.implicit_fields[position..position + 1]
+        }
     }
 }
 
@@ -1502,7 +2111,7 @@ pub struct FieldDefinition {
     pub(crate) arguments: ArgumentsDefinition,
     pub(crate) ty: Type,
     pub(crate) directives: Arc<Vec<Directive>>,
-    pub(crate) loc: HirNodeLocation,
+    pub(crate) loc: Option<HirNodeLocation>,
 }
 
 impl FieldDefinition {
@@ -1521,8 +2130,27 @@ impl FieldDefinition {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get the AST location information for this HIR node.
-    pub fn loc(&self) -> HirNodeLocation {
+    pub fn loc(&self) -> Option<HirNodeLocation> {
         self.loc
     }
 
@@ -1581,6 +2209,25 @@ impl InputValueDefinition {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get the AST location information for this HIR node.
     pub fn loc(&self) -> Option<HirNodeLocation> {
         self.loc
@@ -1609,7 +2256,7 @@ pub struct ScalarTypeDefinition {
     pub(crate) name: Name,
     pub(crate) directives: Arc<Vec<Directive>>,
     pub(crate) built_in: bool,
-    pub(crate) loc: Option<HirNodeLocation>,
+    pub(crate) loc: HirNodeLocation,
     pub(crate) extensions: Vec<Arc<ScalarTypeExtension>>,
 }
 
@@ -1631,9 +2278,40 @@ impl ScalarTypeDefinition {
         self.description.as_deref()
     }
 
-    /// Get a reference to scalar definition's directives.
-    pub fn directives(&self) -> &[Directive] {
+    /// Get a reference to scalar definition's directives (excluding those on extensions).
+    pub fn self_directives(&self) -> &[Directive] {
         self.directives.as_ref()
+    }
+
+    /// Returns an iterator of directives on either the type definition or its type extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
+        self.self_directives()
+            .iter()
+            .chain(self.extensions.iter().flat_map(|ext| ext.directives()))
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
     }
 
     /// Returns true if the current scalar is a GraphQL built in.
@@ -1642,13 +2320,17 @@ impl ScalarTypeDefinition {
     }
 
     /// Get the AST location information for this HIR node.
-    pub fn loc(&self) -> Option<HirNodeLocation> {
+    pub fn loc(&self) -> HirNodeLocation {
         self.loc
     }
 
     /// Extensions that apply to this definition
     pub fn extensions(&self) -> &[Arc<ScalarTypeExtension>] {
         &self.extensions
+    }
+
+    pub(crate) fn push_extension(&mut self, ext: Arc<ScalarTypeExtension>) {
+        self.extensions.push(ext);
     }
 }
 
@@ -1660,6 +2342,8 @@ pub struct EnumTypeDefinition {
     pub(crate) enum_values_definition: Arc<Vec<EnumValueDefinition>>,
     pub(crate) loc: HirNodeLocation,
     pub(crate) extensions: Vec<Arc<EnumTypeExtension>>,
+    pub(crate) values_by_name: ByNameWithExtensions,
+    pub(crate) is_introspection: bool,
 }
 
 impl EnumTypeDefinition {
@@ -1678,14 +2362,67 @@ impl EnumTypeDefinition {
         self.description.as_deref()
     }
 
-    /// Get a reference to enum definition's directives.
-    pub fn directives(&self) -> &[Directive] {
+    /// Get a reference to enum definition's directives (excluding those on extensions).
+    pub fn self_directives(&self) -> &[Directive] {
         self.directives.as_ref()
     }
 
-    /// Get a reference to enum definition's enum values definition vector.
-    pub fn enum_values_definition(&self) -> &[EnumValueDefinition] {
+    /// Returns an iterator of directives on either the type definition or its type extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
+        self.self_directives()
+            .iter()
+            .chain(self.extensions.iter().flat_map(|ext| ext.directives()))
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
+    }
+
+    /// Returns the values of this enum definition, excluding those from extensions.
+    pub fn self_values(&self) -> &[EnumValueDefinition] {
         self.enum_values_definition.as_ref()
+    }
+
+    /// Returns an iterator of values of this enum type,
+    /// whether from its own definition or from extensions.
+    pub fn values(
+        &self,
+    ) -> impl Iterator<Item = &EnumValueDefinition> + ExactSizeIterator + DoubleEndedIterator {
+        self.values_by_name.iter(
+            self.self_values(),
+            self.extensions(),
+            EnumTypeExtension::enum_values_definition,
+        )
+    }
+
+    /// Find an enum value by its name, either in this enum type definition or its extensions.
+    pub fn value(&self, name: &str) -> Option<&EnumValueDefinition> {
+        self.values_by_name.get(
+            name,
+            self.self_values(),
+            self.extensions(),
+            EnumTypeExtension::enum_values_definition,
+        )
     }
 
     /// Get the AST location information for this HIR node.
@@ -1696,6 +2433,24 @@ impl EnumTypeDefinition {
     /// Extensions that apply to this definition
     pub fn extensions(&self) -> &[Arc<EnumTypeExtension>] {
         &self.extensions
+    }
+
+    pub(crate) fn push_extension(&mut self, ext: Arc<EnumTypeExtension>) {
+        let next_index = self.extensions.len();
+        self.values_by_name.add_extension(
+            next_index,
+            ext.enum_values_definition(),
+            EnumValueDefinition::enum_value,
+        );
+        self.extensions.push(ext);
+    }
+
+    /// Returns `true` if this Object Type Definition is one of the
+    /// introspection types:
+    ///
+    /// `__TypeKind`, `__DirectiveLocation`
+    pub fn is_introspection(&self) -> bool {
+        self.is_introspection
     }
 }
 
@@ -1723,6 +2478,25 @@ impl EnumValueDefinition {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get the AST location information for this HIR node.
     pub fn loc(&self) -> HirNodeLocation {
         self.loc
@@ -1737,6 +2511,8 @@ pub struct UnionTypeDefinition {
     pub(crate) union_members: Arc<Vec<UnionMember>>,
     pub(crate) loc: HirNodeLocation,
     pub(crate) extensions: Vec<Arc<UnionTypeExtension>>,
+    pub(crate) members_by_name: ByNameWithExtensions,
+    pub(crate) implicit_fields: Arc<Vec<FieldDefinition>>,
 }
 
 impl UnionTypeDefinition {
@@ -1755,14 +2531,71 @@ impl UnionTypeDefinition {
         self.description.as_deref()
     }
 
-    /// Get a reference to union definition's directives.
-    pub fn directives(&self) -> &[Directive] {
+    /// Get a reference to union definition's directives (excluding those on extensions).
+    pub fn self_directives(&self) -> &[Directive] {
         self.directives.as_ref()
     }
 
-    /// Get a reference to union definition's union members.
-    pub fn union_members(&self) -> &[UnionMember] {
+    /// Returns an iterator of directives on either the type definition or its type extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
+        self.self_directives()
+            .iter()
+            .chain(self.extensions.iter().flat_map(|ext| ext.directives()))
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
+    }
+
+    /// Get a reference to union definition's union members,
+    /// excluding those from extensions.
+    pub fn self_members(&self) -> &[UnionMember] {
         self.union_members.as_ref()
+    }
+
+    /// Returns an iterator of members of this union type,
+    /// whether from its own definition or from extensions.
+    pub fn members(
+        &self,
+    ) -> impl Iterator<Item = &UnionMember> + ExactSizeIterator + DoubleEndedIterator {
+        self.members_by_name.iter(
+            self.self_members(),
+            self.extensions(),
+            UnionTypeExtension::union_members,
+        )
+    }
+
+    /// Returns whether the type of the given name is a member of this union type,
+    /// either from the union type definition or its extensions.
+    pub fn has_member(&self, name: &str) -> bool {
+        self.members_by_name
+            .get(
+                name,
+                self.self_members(),
+                self.extensions(),
+                UnionTypeExtension::union_members,
+            )
+            .is_some()
     }
 
     /// Get the AST location information for this HIR node.
@@ -1773,6 +2606,17 @@ impl UnionTypeDefinition {
     /// Extensions that apply to this definition
     pub fn extensions(&self) -> &[Arc<UnionTypeExtension>] {
         &self.extensions
+    }
+
+    pub(crate) fn push_extension(&mut self, ext: Arc<UnionTypeExtension>) {
+        let next_index = self.extensions.len();
+        self.members_by_name
+            .add_extension(next_index, ext.union_members(), UnionMember::name);
+        self.extensions.push(ext);
+    }
+
+    pub(crate) fn implicit_fields(&self) -> &[FieldDefinition] {
+        self.implicit_fields.as_ref()
     }
 }
 
@@ -1808,6 +2652,9 @@ pub struct InterfaceTypeDefinition {
     pub(crate) fields_definition: Arc<Vec<FieldDefinition>>,
     pub(crate) loc: HirNodeLocation,
     pub(crate) extensions: Vec<Arc<InterfaceTypeExtension>>,
+    pub(crate) fields_by_name: ByNameWithExtensions,
+    pub(crate) implements_interfaces_by_name: ByNameWithExtensions,
+    pub(crate) implicit_fields: Arc<Vec<FieldDefinition>>,
 }
 
 impl InterfaceTypeDefinition {
@@ -1826,24 +2673,101 @@ impl InterfaceTypeDefinition {
         self.description.as_deref()
     }
 
-    /// Get a reference to interface definition's implements interfaces vector.
-    pub fn implements_interfaces(&self) -> &[ImplementsInterface] {
+    /// Returns interfaces implemented by this interface type definition,
+    /// excluding those from extensions.
+    pub fn self_implements_interfaces(&self) -> &[ImplementsInterface] {
         self.implements_interfaces.as_ref()
     }
 
-    /// Get a reference to the interface definition's directives.
-    pub fn directives(&self) -> &[Directive] {
+    /// Returns an iterator of interfaces implemented by this interface type,
+    /// whether from its own definition or from extensions.
+    pub fn implements_interfaces(
+        &self,
+    ) -> impl Iterator<Item = &ImplementsInterface> + ExactSizeIterator + DoubleEndedIterator {
+        self.implements_interfaces_by_name.iter(
+            self.self_implements_interfaces(),
+            self.extensions(),
+            InterfaceTypeExtension::implements_interfaces,
+        )
+    }
+
+    /// Returns whether this interface type implements the interface of the given name,
+    /// either in its own definition or its extensions.
+    pub fn implements_interface(&self, name: &str) -> bool {
+        self.implements_interfaces_by_name
+            .get(
+                name,
+                self.self_implements_interfaces(),
+                self.extensions(),
+                InterfaceTypeExtension::implements_interfaces,
+            )
+            .is_some()
+    }
+
+    /// Get a reference to the interface definition's directives (excluding those on extensions).
+    pub fn self_directives(&self) -> &[Directive] {
         self.directives.as_ref()
     }
 
-    /// Get a reference to interface definition's fields.
-    pub fn fields_definition(&self) -> &[FieldDefinition] {
+    /// Returns an iterator of directives on either the type definition or its type extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
+        self.self_directives()
+            .iter()
+            .chain(self.extensions.iter().flat_map(|ext| ext.directives()))
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
+    }
+
+    /// Get a reference to interface definition's fields,
+    /// excluding those from extensions.
+    pub fn self_fields(&self) -> &[FieldDefinition] {
         self.fields_definition.as_ref()
     }
 
-    /// Find a field in interface face definition.
+    /// Returns an iterator of fields of this interface type,
+    /// whether from its own definition or from extensions.
+    pub fn fields(
+        &self,
+    ) -> impl Iterator<Item = &FieldDefinition> + ExactSizeIterator + DoubleEndedIterator {
+        self.fields_by_name.iter(
+            self.self_fields(),
+            self.extensions(),
+            InterfaceTypeExtension::fields_definition,
+        )
+    }
+
+    /// Find a field by its name, either in this interface type definition or its extensions.
     pub fn field(&self, name: &str) -> Option<&FieldDefinition> {
-        self.fields_definition().iter().find(|f| f.name() == name)
+        self.fields_by_name
+            .get(
+                name,
+                self.self_fields(),
+                self.extensions(),
+                InterfaceTypeExtension::fields_definition,
+            )
+            .or_else(|| self.implicit_fields().iter().find(|f| f.name() == name))
     }
 
     /// Get the AST location information for this HIR node.
@@ -1855,6 +2779,25 @@ impl InterfaceTypeDefinition {
     pub fn extensions(&self) -> &[Arc<InterfaceTypeExtension>] {
         &self.extensions
     }
+
+    pub(crate) fn push_extension(&mut self, ext: Arc<InterfaceTypeExtension>) {
+        let next_index = self.extensions.len();
+        self.fields_by_name.add_extension(
+            next_index,
+            ext.fields_definition(),
+            FieldDefinition::name,
+        );
+        self.implements_interfaces_by_name.add_extension(
+            next_index,
+            ext.implements_interfaces(),
+            ImplementsInterface::interface,
+        );
+        self.extensions.push(ext);
+    }
+
+    pub(crate) fn implicit_fields(&self) -> &[FieldDefinition] {
+        self.implicit_fields.as_ref()
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -1865,6 +2808,7 @@ pub struct InputObjectTypeDefinition {
     pub(crate) input_fields_definition: Arc<Vec<InputValueDefinition>>,
     pub(crate) loc: HirNodeLocation,
     pub(crate) extensions: Vec<Arc<InputObjectTypeExtension>>,
+    pub(crate) input_fields_by_name: ByNameWithExtensions,
 }
 
 impl InputObjectTypeDefinition {
@@ -1883,14 +2827,68 @@ impl InputObjectTypeDefinition {
         self.description.as_deref()
     }
 
-    /// Get a reference to input object definition's directives.
-    pub fn directives(&self) -> &[Directive] {
+    /// Get a reference to input object definition's directives (excluding those on extensions).
+    pub fn self_directives(&self) -> &[Directive] {
         self.directives.as_ref()
     }
 
-    /// Get a reference to input fields definitions.
-    pub fn input_fields_definition(&self) -> &[InputValueDefinition] {
+    /// Returns an iterator of directives on either the type definition or its type extensions
+    pub fn directives(&self) -> impl Iterator<Item = &Directive> + '_ {
+        self.self_directives()
+            .iter()
+            .chain(self.extensions.iter().flat_map(|ext| ext.directives()))
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    ///
+    /// Includes directives on either the `schema` definition or its extensions,
+    /// like [`directives`][Self::directives].
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .filter(move |directive| directive.name() == name)
+    }
+
+    /// Get a reference to input fields definitions,
+    /// excluding those from extensions.
+    pub fn self_fields(&self) -> &[InputValueDefinition] {
         self.input_fields_definition.as_ref()
+    }
+
+    /// Returns an iterator of fields of this input object type,
+    /// whether from its own definition or from extensions.
+    pub fn fields(
+        &self,
+    ) -> impl Iterator<Item = &InputValueDefinition> + ExactSizeIterator + DoubleEndedIterator {
+        self.input_fields_by_name.iter(
+            self.self_fields(),
+            self.extensions(),
+            InputObjectTypeExtension::input_fields_definition,
+        )
+    }
+
+    /// Find a field by its name, either in this input object type definition or its extensions.
+    pub fn field(&self, name: &str) -> Option<&InputValueDefinition> {
+        self.input_fields_by_name.get(
+            name,
+            self.self_fields(),
+            self.extensions(),
+            InputObjectTypeExtension::input_fields_definition,
+        )
     }
 
     /// Get the AST location information for this HIR node.
@@ -1901,6 +2899,16 @@ impl InputObjectTypeDefinition {
     /// Extensions that apply to this definition
     pub fn extensions(&self) -> &[Arc<InputObjectTypeExtension>] {
         &self.extensions
+    }
+
+    pub(crate) fn push_extension(&mut self, ext: Arc<InputObjectTypeExtension>) {
+        let next_index = self.extensions.len();
+        self.input_fields_by_name.add_extension(
+            next_index,
+            ext.input_fields_definition(),
+            InputValueDefinition::name,
+        );
+        self.extensions.push(ext);
     }
 }
 
@@ -1950,8 +2958,27 @@ impl SchemaExtension {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get a reference to the schema definition's root operation type definition.
-    pub fn root_operation_type_definition(&self) -> &[RootOperationTypeDefinition] {
+    pub fn root_operations(&self) -> &[RootOperationTypeDefinition] {
         self.root_operation_type_definition.as_ref()
     }
 
@@ -1984,6 +3011,25 @@ impl ScalarTypeExtension {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get the AST location information for this HIR node.
     pub fn loc(&self) -> HirNodeLocation {
         self.loc
@@ -2012,6 +3058,25 @@ impl ObjectTypeExtension {
     /// Get a reference to the object type definition's directives.
     pub fn directives(&self) -> &[Directive] {
         self.directives.as_ref()
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
     }
 
     /// Get a reference to the object type definition's field definitions.
@@ -2065,6 +3130,25 @@ impl InterfaceTypeExtension {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get a reference to interface definition's fields.
     pub fn fields_definition(&self) -> &[FieldDefinition] {
         self.fields_definition.as_ref()
@@ -2087,6 +3171,7 @@ pub struct UnionTypeExtension {
     pub(crate) directives: Arc<Vec<Directive>>,
     pub(crate) union_members: Arc<Vec<UnionMember>>,
     pub(crate) loc: HirNodeLocation,
+    pub(crate) members_by_name: ByNameWithExtensions,
 }
 
 impl UnionTypeExtension {
@@ -2103,6 +3188,25 @@ impl UnionTypeExtension {
     /// Get a reference to union definition's directives.
     pub fn directives(&self) -> &[Directive] {
         self.directives.as_ref()
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
     }
 
     /// Get a reference to union definition's union members.
@@ -2140,6 +3244,25 @@ impl EnumTypeExtension {
         self.directives.as_ref()
     }
 
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
+    }
+
     /// Get a reference to enum definition's enum values definition vector.
     pub fn enum_values_definition(&self) -> &[EnumValueDefinition] {
         self.enum_values_definition.as_ref()
@@ -2173,6 +3296,25 @@ impl InputObjectTypeExtension {
     /// Get a reference to input object definition's directives.
     pub fn directives(&self) -> &[Directive] {
         self.directives.as_ref()
+    }
+
+    /// Returns the first directive with the given name.
+    ///
+    /// For repeatable directives, see [`directives_by_name`][Self::directives_by_name] (plural).
+    pub fn directive_by_name(&self, name: &str) -> Option<&Directive> {
+        self.directives_by_name(name).next()
+    }
+
+    /// Returns an iterator of directives with the given name.
+    ///
+    /// For non-repeatable directives, [`directive_by_name`][Self::directive_by_name] (singular).
+    pub fn directives_by_name<'def: 'name, 'name>(
+        &'def self,
+        name: &'name str,
+    ) -> impl Iterator<Item = &'def Directive> + 'name {
+        self.directives()
+            .iter()
+            .filter(move |directive| directive.name() == name)
     }
 
     pub fn input_fields_definition(&self) -> &[InputValueDefinition] {
@@ -2263,6 +3405,253 @@ mod tests {
         // but this is approximation is still in the range of finite f64 values.
         assert_eq!(default_values[2], "98765432109876540000");
         assert_eq!(default_values[3], "98765432109876540000");
+    }
+
+    #[test]
+    fn root_operations() {
+        let mut compiler = ApolloCompiler::new();
+        let first = r#"
+            schema @core(feature: "https://specs.apollo.dev/core/v0.1")
+            type Query {
+                field: Int
+            }
+            type Subscription {
+                newsletter: [String]
+            }
+        "#;
+        let second = r#"
+            extend schema @core(feature: "https://specs.apollo.dev/join/v0.1") {
+                query: MyQuery
+            }
+            type MyQuery {
+                different_field: String
+            }
+        "#;
+        compiler.add_type_system(first, "first.graphql");
+        compiler.add_type_system(second, "second.graphql");
+
+        let schema = compiler.db.schema();
+        assert_eq!(
+            schema
+                .self_root_operations()
+                .iter()
+                .map(|op| op.named_type().name())
+                .collect::<Vec<_>>(),
+            ["Subscription"]
+        );
+        assert_eq!(
+            schema
+                .root_operations()
+                .map(|op| op.named_type().name())
+                .collect::<Vec<_>>(),
+            ["Subscription", "MyQuery"]
+        );
+        assert!(schema.mutation().is_none());
+        assert_eq!(schema.query().unwrap(), "MyQuery");
+        assert_eq!(schema.subscription().unwrap(), "Subscription");
+    }
+
+    #[test]
+    fn extensions() {
+        let mut compiler = ApolloCompiler::new();
+        let first = r#"
+            scalar Scalar @specifiedBy(url: "https://apollographql.com")
+            type Object implements Intf {
+                field: Int,
+            }
+            type Object2 {
+                field: String,
+            }
+            interface Intf {
+                field: Int,
+            }
+            input Input {
+                field: Enum,
+            }
+            enum Enum {
+                VALUE,
+            }
+            union Union = Object | Object2;
+        "#;
+        let second = r#"
+            extend scalar Scalar @deprecated(reason: "do something else")
+            extend interface Intf implements Intf2 {
+                field2: Scalar,
+            }
+            interface Intf2 {
+                field3: String,
+            }
+            extend type Object implements Intf2 {
+                field2: Scalar,
+                field3: String,
+            }
+            extend enum Enum {
+                "like VALUE, but more"
+                VALUE_2,
+            }
+            extend input Input {
+                field2: Int,
+            }
+            extend union Union = Query;
+            type Query {
+                object: Object,
+            }
+        "#;
+        compiler.add_type_system(first, "first.graphql");
+        compiler.add_type_system(second, "second.graphql");
+
+        let scalar = &compiler.db.types_definitions_by_name()["Scalar"];
+        let object = &compiler.db.object_types()["Object"];
+        let interface = &compiler.db.interfaces()["Intf"];
+        let input = &compiler.db.input_objects()["Input"];
+        let enum_ = &compiler.db.enums()["Enum"];
+        let union_ = &compiler.db.unions()["Union"];
+
+        assert_eq!(
+            scalar
+                .self_directives()
+                .iter()
+                .map(|d| d.name())
+                .collect::<Vec<_>>(),
+            ["specifiedBy"]
+        );
+        assert_eq!(
+            scalar.directives().map(|d| d.name()).collect::<Vec<_>>(),
+            ["specifiedBy", "deprecated"]
+        );
+        assert_eq!(
+            *scalar
+                .directive_by_name("deprecated")
+                .unwrap()
+                .argument_by_name("reason")
+                .unwrap(),
+            super::Value::String("do something else".to_owned())
+        );
+        assert!(scalar.directive_by_name("haunted").is_none());
+
+        assert_eq!(
+            object
+                .self_fields()
+                .iter()
+                .map(|f| f.name())
+                .collect::<Vec<_>>(),
+            ["field"]
+        );
+        assert_eq!(
+            object.fields().map(|f| f.name()).collect::<Vec<_>>(),
+            ["field", "field2", "field3"]
+        );
+        assert_eq!(
+            object.field(&compiler.db, "field").unwrap().ty().name(),
+            "Int"
+        );
+        assert!(object.field(&compiler.db, "field4").is_none());
+
+        assert_eq!(
+            object
+                .self_implements_interfaces()
+                .iter()
+                .map(|i| i.interface())
+                .collect::<Vec<_>>(),
+            ["Intf"]
+        );
+        assert_eq!(
+            object
+                .implements_interfaces()
+                .map(|f| f.interface())
+                .collect::<Vec<_>>(),
+            ["Intf", "Intf2"]
+        );
+        assert!(object.implements_interface("Intf2"));
+        assert!(!object.implements_interface("Intf3"));
+
+        assert_eq!(
+            interface
+                .self_fields()
+                .iter()
+                .map(|f| f.name())
+                .collect::<Vec<_>>(),
+            ["field"]
+        );
+        assert_eq!(
+            interface.fields().map(|f| f.name()).collect::<Vec<_>>(),
+            ["field", "field2"]
+        );
+        assert_eq!(interface.field("field").unwrap().ty().name(), "Int");
+        assert!(interface.field("field4").is_none());
+
+        assert!(interface.self_implements_interfaces().is_empty());
+        assert_eq!(
+            interface
+                .implements_interfaces()
+                .map(|f| f.interface())
+                .collect::<Vec<_>>(),
+            ["Intf2"]
+        );
+        assert!(interface.implements_interface("Intf2"));
+        assert!(!interface.implements_interface("Intf3"));
+
+        assert_eq!(
+            input
+                .self_fields()
+                .iter()
+                .map(|f| f.name())
+                .collect::<Vec<_>>(),
+            ["field"]
+        );
+        assert_eq!(
+            input.fields().map(|f| f.name()).collect::<Vec<_>>(),
+            ["field", "field2"]
+        );
+        assert_eq!(input.field("field").unwrap().ty().name(), "Enum");
+        assert!(input.field("field3").is_none());
+
+        assert_eq!(
+            enum_
+                .self_values()
+                .iter()
+                .map(|v| v.enum_value())
+                .collect::<Vec<_>>(),
+            ["VALUE"]
+        );
+        assert_eq!(
+            enum_.values().map(|v| v.enum_value()).collect::<Vec<_>>(),
+            ["VALUE", "VALUE_2"]
+        );
+        assert_eq!(
+            enum_.value("VALUE_2").unwrap().description(),
+            Some("like VALUE, but more")
+        );
+        assert!(enum_.value("VALUE_3").is_none());
+
+        assert_eq!(
+            union_
+                .self_members()
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>(),
+            ["Object", "Object2"]
+        );
+        assert_eq!(
+            union_.members().map(|m| m.name()).collect::<Vec<_>>(),
+            ["Object", "Object2", "Query"]
+        );
+        assert!(union_.has_member("Object2"));
+        assert!(!union_.has_member("Enum"));
+    }
+
+    #[test]
+    fn query_extended_type() {
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system("type Query { foo: String }", "base.graphql");
+        compiler.add_type_system("extend type Query { bar: Int }", "ext.graphql");
+        compiler.add_executable("{ bar }", "query.graphql");
+        let operations = compiler.db.all_operations();
+        let fields = operations[0].fields(&compiler.db);
+        // This unwrap failed before https://github.com/apollographql/apollo-rs/pull/482
+        // changed the behavior of `ObjectTypeDefinition::field(name)` in `hir_db::parent_ty`
+        let ty = fields[0].ty(&compiler.db).unwrap();
+        assert_eq!(ty.name(), "Int");
     }
 
     #[test]
@@ -2442,5 +3831,103 @@ mod tests {
             )
             .expect("IntrospectDeepFragments operation does not exist");
         assert!(!deep_introspect.is_introspection(&db));
+    }
+
+    #[test]
+    fn introspection_field_types() {
+        let input = r#"
+type Query {
+  id: String
+  name: String
+  birthday: Date
+}
+
+scalar Date @specifiedBy(url: "datespec.com")
+
+{
+  __type(name: "User") {
+    name
+    fields {
+      name
+      type {
+        name
+      }
+    }
+  }
+}
+        "#;
+        let mut compiler = ApolloCompiler::new();
+        let file_id = compiler.add_type_system(input, "ts.graphql");
+
+        let diagnostics = compiler.validate();
+        assert!(diagnostics.is_empty());
+
+        let db = compiler.db;
+        let op = db.find_operation(file_id, None).unwrap();
+        let ty_field = op
+            .selection_set()
+            .field("__type")
+            .unwrap()
+            .ty(&db)
+            .unwrap()
+            .name();
+
+        assert_eq!(ty_field, "__Type");
+    }
+
+    #[test]
+    fn built_in_types() {
+        let input = r#"
+type Query {
+  id: String
+  name: String
+  birthday: Date
+}
+        "#;
+
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system(input, "ts.graphql");
+        let db = compiler.db;
+
+        // introspection types
+        assert!(db
+            .find_object_type_by_name("__Schema".to_string())
+            .is_some());
+        assert!(db.find_object_type_by_name("__Type".to_string()).is_some());
+        assert!(db.find_enum_by_name("__TypeKind".to_string()).is_some());
+        assert!(db.find_object_type_by_name("__Field".to_string()).is_some());
+        assert!(db
+            .find_object_type_by_name("__InputValue".to_string())
+            .is_some());
+        assert!(db
+            .find_object_type_by_name("__EnumValue".to_string())
+            .is_some());
+        assert!(db
+            .find_object_type_by_name("__Directive".to_string())
+            .is_some());
+        assert!(db
+            .find_enum_by_name("__DirectiveLocation".to_string())
+            .is_some());
+
+        // scalar types
+        assert!(db.find_scalar_by_name("Int".to_string()).is_some());
+        assert!(db.find_scalar_by_name("Float".to_string()).is_some());
+        assert!(db.find_scalar_by_name("Boolean".to_string()).is_some());
+        assert!(db.find_scalar_by_name("String".to_string()).is_some());
+        assert!(db.find_scalar_by_name("ID".to_string()).is_some());
+
+        // directive definitions
+        assert!(db
+            .find_directive_definition_by_name("specifiedBy".to_string())
+            .is_some());
+        assert!(db
+            .find_directive_definition_by_name("skip".to_string())
+            .is_some());
+        assert!(db
+            .find_directive_definition_by_name("include".to_string())
+            .is_some());
+        assert!(db
+            .find_directive_definition_by_name("deprecated".to_string())
+            .is_some());
     }
 }
