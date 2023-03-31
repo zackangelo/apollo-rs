@@ -1396,6 +1396,10 @@ impl Field {
         Some(def)
     }
 
+    pub fn parent_type_name(&self) -> Option<&str> {
+        self.parent_obj.as_ref().map(|p| p.as_str())
+    }
+
     /// Get the field's parent type definition.
     pub fn parent_type(&self, db: &dyn HirDatabase) -> Option<TypeDefinition> {
         db.find_type_definition_by_name(self.parent_obj.as_ref()?.to_string())
@@ -2079,7 +2083,7 @@ impl ObjectTypeDefinition {
         self.is_introspection
     }
 
-    pub(crate) fn implicit_fields(&self, db: &dyn HirDatabase) -> &[FieldDefinition] {
+    pub fn implicit_fields(&self, db: &dyn HirDatabase) -> &[FieldDefinition] {
         let is_root_query = db
             .schema()
             .root_operations()
@@ -2815,7 +2819,7 @@ impl InterfaceTypeDefinition {
         self.extensions.push(ext);
     }
 
-    pub(crate) fn implicit_fields(&self) -> &[FieldDefinition] {
+    pub fn implicit_fields(&self) -> &[FieldDefinition] {
         self.implicit_fields.as_ref()
     }
 }
