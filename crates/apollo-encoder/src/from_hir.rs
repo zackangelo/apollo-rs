@@ -23,7 +23,7 @@ impl TryFrom<&hir::ObjectTypeDefinition> for encoder::ObjectDefinition {
             def.interface(interface.interface().to_owned());
         }
 
-        for field in value.fields_definition() {
+        for field in value.fields() {
             def.field(field.try_into()?);
         }
 
@@ -50,7 +50,7 @@ impl TryFrom<&hir::InterfaceTypeDefinition> for encoder::InterfaceDefinition {
             def.interface(interface.interface().to_owned());
         }
 
-        for field in value.fields_definition() {
+        for field in value.fields() {
             def.field(field.try_into()?);
         }
 
@@ -92,7 +92,7 @@ impl TryFrom<&hir::UnionTypeDefinition> for encoder::UnionDefinition {
             def.description(description);
         }
 
-        for member in value.union_members() {
+        for member in value.members() {
             def.member(member.name().to_owned());
         }
 
@@ -111,7 +111,7 @@ impl TryFrom<&hir::EnumTypeDefinition> for encoder::EnumDefinition {
         let name = value.name().to_owned();
         let mut def = encoder::EnumDefinition::new(name);
 
-        for value in value.enum_values_definition() {
+        for value in value.values() {
             def.value(value.try_into()?);
         }
 
@@ -157,7 +157,7 @@ impl TryFrom<&hir::InputObjectTypeDefinition> for encoder::InputObjectDefinition
             def.directive(directive.try_into()?);
         }
 
-        for input_field in value.input_fields_definition() {
+        for input_field in value.fields() {
             def.field(input_field.try_into()?);
         }
 
