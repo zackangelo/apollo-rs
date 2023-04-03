@@ -101,9 +101,34 @@ impl ObjectDefinition {
         self.fields.push(field)
     }
 
+    /// Gets a mutable reference to ObjectDef's fields
+    pub fn fields_mut(&mut self) -> &mut Vec<FieldDefinition> {
+        &mut self.fields
+    }
+
+    /// Gets a reference to ObjectDef's fields
+    pub fn fields(&mut self) -> &Vec<FieldDefinition> {
+        &self.fields
+    }
+
     /// Add an interface ObjectDef implements.
     pub fn interface(&mut self, interface: String) {
         self.interfaces.push(interface)
+    }
+
+    /// Gets interfaces for this ObjectDef
+    pub fn interfaces(&self) -> &Vec<String> {
+        &self.interfaces
+    }
+
+    /// Gets a mutable reference to ObjectDef's interfaces
+    pub fn interfaces_mut(&mut self) -> &mut Vec<String> {
+        &mut self.interfaces
+    }
+
+    /// Gets name
+    pub fn get_name(&self) -> &str {
+        &self.name
     }
 }
 

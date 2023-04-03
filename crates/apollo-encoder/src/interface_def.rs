@@ -98,6 +98,11 @@ impl InterfaceDefinition {
         }
     }
 
+    /// Get the InterfaceDef's name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     /// Set the schema def's description.
     pub fn description(&mut self, description: String) {
         self.description = Some(StringValue::Top {
@@ -115,9 +120,19 @@ impl InterfaceDefinition {
         self.extend = true;
     }
 
-    /// Push a Field to schema def's fields vector.
+    /// Push a Field to interface def's fields vector.
     pub fn field(&mut self, field: FieldDefinition) {
         self.fields.push(field)
+    }
+
+    /// Gets InterfaceDef's fields
+    pub fn fields(&self) -> &Vec<FieldDefinition> {
+        &self.fields
+    }
+
+    /// Gets a mutable reference to InterfaceDef's fields
+    pub fn fields_mut(&mut self) -> &mut Vec<FieldDefinition> {
+        &mut self.fields
     }
 
     /// Add a directive.

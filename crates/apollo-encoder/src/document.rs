@@ -150,6 +150,16 @@ impl Document {
     pub fn interface_definitions_mut(&mut self) -> &mut Vec<InterfaceDefinition> {
         &mut self.interface_type_definitions
     }
+
+    /// Return mutable reference to object definitions
+    pub fn enum_definitions_mut(&mut self) -> &mut Vec<EnumDefinition> {
+        &mut self.enum_type_definitions
+    }
+
+    /// Return mutable reference to schema definitions
+    pub fn schema_definitions_mut(&mut self) -> &mut Vec<SchemaDefinition> {
+        &mut self.schema_definitions
+    }
 }
 
 impl fmt::Display for Document {

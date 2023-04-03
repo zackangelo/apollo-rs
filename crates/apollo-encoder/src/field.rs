@@ -61,6 +61,11 @@ impl FieldDefinition {
         }
     }
 
+    /// Gets the field's name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     /// Set the Field's description.
     pub fn description(&mut self, description: String) {
         self.description = Some(StringValue::Field {

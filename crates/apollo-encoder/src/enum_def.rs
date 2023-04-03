@@ -86,6 +86,11 @@ impl EnumDefinition {
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive)
     }
+
+    /// Gets the name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
 }
 
 impl fmt::Display for EnumDefinition {
