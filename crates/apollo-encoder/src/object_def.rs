@@ -130,6 +130,11 @@ impl ObjectDefinition {
     pub fn get_name(&self) -> &str {
         &self.name
     }
+
+    /// Sets name
+    pub fn set_name(&mut self, new_name: &str) {
+        self.name = new_name.to_owned();
+    }
 }
 
 impl fmt::Display for ObjectDefinition {

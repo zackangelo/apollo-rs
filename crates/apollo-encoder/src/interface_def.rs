@@ -103,6 +103,11 @@ impl InterfaceDefinition {
         &self.name
     }
 
+    /// Sets the name
+    pub fn set_name(&mut self, new_name: &str) {
+        self.name = new_name.to_owned();
+    }
+
     /// Set the schema def's description.
     pub fn description(&mut self, description: String) {
         self.description = Some(StringValue::Top {
