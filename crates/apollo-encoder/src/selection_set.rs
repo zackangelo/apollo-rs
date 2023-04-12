@@ -60,6 +60,11 @@ impl SelectionSet {
         &mut self.selections
     }
 
+    /// Gets selections
+    pub fn get_selections(&self) -> &Vec<Selection> {
+        &self.selections
+    }
+
     /// Should be used everywhere in this crate isntead of the Display implementation
     /// Display implementation is only useful as a public api
     pub(crate) fn format_with_indent(&self, mut indent_level: usize) -> String {
