@@ -105,6 +105,11 @@ impl FragmentSpread {
         }
     }
 
+    /// Gets the name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     /// Add a directive.
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive)
