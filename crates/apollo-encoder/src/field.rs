@@ -156,6 +156,11 @@ impl Field {
         self.alias = alias;
     }
 
+    /// Gets alias
+    pub fn get_alias(&self) -> Option<&str> {
+        self.alias.as_ref().map(|s| s.as_str())
+    }
+
     /// Add a directive to a field
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive);
