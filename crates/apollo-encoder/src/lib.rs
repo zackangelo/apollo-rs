@@ -54,3 +54,6 @@ pub use ty::Type_;
 pub use union_def::UnionDefinition;
 pub use value::Value;
 pub use variable::VariableDefinition;
+
+#[cfg(feature = "apollo-compiler")]
+pub use from_hir::FromHirError;
