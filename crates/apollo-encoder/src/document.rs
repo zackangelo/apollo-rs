@@ -160,6 +160,41 @@ impl Document {
     pub fn schema_definitions_mut(&mut self) -> &mut Vec<SchemaDefinition> {
         &mut self.schema_definitions
     }
+
+    /// Return reference to schema definitions
+    pub fn schema_definitions(&self) -> &Vec<SchemaDefinition> {
+        &self.schema_definitions
+    }
+
+    /// Return reference to object definitions
+    pub fn object_definitions(&self) -> &Vec<ObjectDefinition> {
+        &self.object_type_definitions
+    }
+
+    /// Return reference to interface definitions
+    pub fn interface_definitions(&self) -> &Vec<InterfaceDefinition> {
+        &self.interface_type_definitions
+    }
+
+    /// Return reference to object definitions
+    pub fn enum_definitions(&self) -> &Vec<EnumDefinition> {
+        &self.enum_type_definitions
+    }
+
+    /// Return reference to object definitions
+    pub fn union_definitions(&self) -> &Vec<UnionDefinition> {
+        &self.union_type_definitions
+    }
+
+    /// Return reference to object definitions
+    pub fn scalar_definitions(&self) -> &Vec<ScalarDefinition> {
+        &self.scalar_type_definitions
+    }
+
+    /// Return input object definitions
+    pub fn input_object_definitions(&self) -> &Vec<InputObjectDefinition> {
+        &self.input_object_type_definitions
+    }
 }
 
 impl fmt::Display for Document {
