@@ -56,6 +56,11 @@ impl ArgumentsDefinition {
     pub fn input_value(&mut self, input_value: InputValueDefinition) {
         self.input_values.push(input_value)
     }
+
+    /// Mutable reference to input values
+    pub fn input_values_mut(&mut self) -> &mut Vec<InputValueDefinition> {
+        &mut self.input_values
+    }
 }
 
 impl fmt::Display for ArgumentsDefinition {

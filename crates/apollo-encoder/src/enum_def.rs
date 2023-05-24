@@ -77,6 +77,11 @@ impl EnumDefinition {
         });
     }
 
+    /// Gets the description
+    pub fn get_description(&self) -> Option<&str> {
+        self.description.as_ref().map(|s| s.source())
+    }
+
     /// Set the Enum Definitions's values.
     pub fn value(&mut self, value: EnumValue) {
         self.values.push(value)
@@ -90,6 +95,11 @@ impl EnumDefinition {
     /// Gets the name
     pub fn get_name(&self) -> &str {
         &self.name
+    }
+
+    /// Sets the name
+    pub fn set_name(&mut self, new_name: &str) {
+        self.name = new_name.to_owned();
     }
 }
 

@@ -52,6 +52,11 @@ impl ScalarDefinition {
         });
     }
 
+    /// Gets the description
+    pub fn get_description(&self) -> Option<&str> {
+        self.description.as_ref().map(|s| s.source())
+    }
+
     /// Add a directive.
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive);
@@ -60,6 +65,16 @@ impl ScalarDefinition {
     /// Set the scalar as an extension
     pub fn extend(&mut self) {
         self.extend = true;
+    }
+
+    /// Gets the name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Sets the name
+    pub fn set_name(&mut self, new_name: &str) {
+        self.name = new_name.to_owned();
     }
 }
 

@@ -73,6 +73,11 @@ impl InputValueDefinition {
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive)
     }
+
+    /// Mutable reference to type
+    pub fn type_mut(&mut self) -> &mut Type_ {
+        &mut self.type_
+    }
 }
 
 impl fmt::Display for InputValueDefinition {

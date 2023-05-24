@@ -81,6 +81,11 @@ impl InputObjectDefinition {
         });
     }
 
+    /// Gets the description
+    pub fn get_description(&self) -> Option<&str> {
+        self.description.as_ref().map(|s| s.source())
+    }
+
     /// Push a Field to InputObjectDef's fields vector.
     pub fn field(&mut self, field: InputField) {
         self.fields.push(field)
@@ -89,6 +94,21 @@ impl InputObjectDefinition {
     /// Add a directive.
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive)
+    }
+
+    /// Gets name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Sets name
+    pub fn set_name(&mut self, new_name: &str) {
+        self.name = new_name.to_owned();
+    }
+
+    /// Gets a mutable reference to ObjectDef's fields
+    pub fn fields_mut(&mut self) -> &mut Vec<InputField> {
+        &mut self.fields
     }
 }
 

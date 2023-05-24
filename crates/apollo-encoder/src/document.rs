@@ -151,14 +151,29 @@ impl Document {
         &mut self.interface_type_definitions
     }
 
-    /// Return mutable reference to object definitions
+    /// Return mutable reference to enums
     pub fn enum_definitions_mut(&mut self) -> &mut Vec<EnumDefinition> {
         &mut self.enum_type_definitions
+    }
+
+    /// Return mutable reference to unions
+    pub fn union_definitions_mut(&mut self) -> &mut Vec<UnionDefinition> {
+        &mut self.union_type_definitions
     }
 
     /// Return mutable reference to schema definitions
     pub fn schema_definitions_mut(&mut self) -> &mut Vec<SchemaDefinition> {
         &mut self.schema_definitions
+    }
+
+    /// Return reference to object definitions
+    pub fn scalar_definitions_mut(&mut self) -> &mut Vec<ScalarDefinition> {
+        &mut self.scalar_type_definitions
+    }
+
+    /// Return input object definitions
+    pub fn input_object_definitions_mut(&mut self) -> &mut Vec<InputObjectDefinition> {
+        &mut self.input_object_type_definitions
     }
 
     /// Return reference to schema definitions
@@ -194,6 +209,11 @@ impl Document {
     /// Return input object definitions
     pub fn input_object_definitions(&self) -> &Vec<InputObjectDefinition> {
         &self.input_object_type_definitions
+    }
+
+    /// Return operation definitions
+    pub fn operation_definitions(&self) -> &Vec<OperationDefinition> {
+        &self.operation_definitions
     }
 }
 

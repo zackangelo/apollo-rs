@@ -90,6 +90,21 @@ impl SchemaDefinition {
     pub fn subscription(&mut self, subscription: String) {
         self.subscription = Some(subscription);
     }
+
+    /// Mutable reference to query
+    pub fn query_mut(&mut self) -> &mut Option<String> {
+        &mut self.query
+    }
+
+    /// Mutable reference to mutation
+    pub fn mutation_mut(&mut self) -> &mut Option<String> {
+        &mut self.mutation
+    }
+
+    /// Mutable reference to subscription
+    pub fn subscription_mut(&mut self) -> &mut Option<String> {
+        &mut self.subscription
+    }
 }
 
 impl Default for SchemaDefinition {

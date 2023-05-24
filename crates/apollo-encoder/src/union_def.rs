@@ -60,6 +60,11 @@ impl UnionDefinition {
         });
     }
 
+    /// Gets the description
+    pub fn get_description(&self) -> Option<&str> {
+        self.description.as_ref().map(|s| s.source())
+    }
+
     /// Add a directive
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive);
@@ -68,6 +73,21 @@ impl UnionDefinition {
     /// Set a UnionDef member.
     pub fn member(&mut self, member: String) {
         self.members.push(member);
+    }
+
+    /// Gets the name
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Sets the name
+    pub fn set_name(&mut self, new_name: &str) {
+        self.name = new_name.to_owned();
+    }
+
+    /// Gets mutable reference to members
+    pub fn members_mut(&mut self) -> &mut Vec<String> {
+        &mut self.members
     }
 }
 

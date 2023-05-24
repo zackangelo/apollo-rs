@@ -115,6 +115,11 @@ impl InterfaceDefinition {
         });
     }
 
+    /// Gets the description
+    pub fn get_description(&self) -> Option<&str> {
+        self.description.as_ref().map(|s| s.source())
+    }
+
     /// Set the interfaces ObjectDef implements.
     pub fn interface(&mut self, interface: String) {
         self.interfaces.push(interface)

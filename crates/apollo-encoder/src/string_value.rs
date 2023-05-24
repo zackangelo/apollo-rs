@@ -24,6 +24,17 @@ pub enum StringValue {
     },
 }
 
+impl StringValue {
+    /// Gets the source
+    pub fn source(&self) -> &str {
+        match self {
+            StringValue::Top { source } => source.as_str(),
+            StringValue::Field { source } => source.as_str(),
+            StringValue::Input { source } => source.as_str(),
+        }
+    }
+}
+
 impl fmt::Display for StringValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

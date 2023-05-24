@@ -82,6 +82,21 @@ impl FieldDefinition {
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive)
     }
+
+    /// Mutable reference to type
+    pub fn type_mut(&mut self) -> &mut Type_ {
+        &mut self.type_
+    }
+
+    /// Reference to type
+    pub fn type_(&self) -> &Type_ {
+        &self.type_
+    }
+
+    /// Mutable reference to arguments
+    pub fn args_mut(&mut self) -> &mut ArgumentsDefinition {
+        &mut self.args
+    }
 }
 
 impl fmt::Display for FieldDefinition {

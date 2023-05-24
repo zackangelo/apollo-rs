@@ -86,6 +86,11 @@ impl ObjectDefinition {
         });
     }
 
+    /// Gets the description
+    pub fn get_description(&self) -> Option<&str> {
+        self.description.as_ref().map(|s| s.source())
+    }
+
     /// Add a directive on ObjectDef.
     pub fn directive(&mut self, directive: Directive) {
         self.directives.push(directive)
