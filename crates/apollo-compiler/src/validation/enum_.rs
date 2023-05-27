@@ -17,6 +17,15 @@ pub fn validate_enum_definitions(db: &dyn ValidationDatabase) -> Vec<ApolloDiagn
     diagnostics
 }
 
+fn iter_with_extensions<'a, Item, Ext>(
+    base: &'a [Item],
+    extensions: &'a [Arc<Ext>],
+    method: impl Fn(&'a Ext) -> &'a [Item],
+) -> impl Iterator<Item = &'a Item> {
+    base.iter()
+        .chain(extensions.iter().flat_map(move |ext| method(ext).iter()))
+}
+
 pub fn validate_enum_definition(
     db: &dyn ValidationDatabase,
     enum_def: Arc<hir::EnumTypeDefinition>,
@@ -24,10 +33,18 @@ pub fn validate_enum_definition(
     let mut diagnostics = db.validate_directives(
         enum_def.directives().cloned().collect(),
         hir::DirectiveLocation::Enum,
+        // enums don't use variables
+        Arc::new(Vec::new()),
+    );
+
+    let enum_values = iter_with_extensions(
+        enum_def.self_values(),
+        enum_def.extensions(),
+        hir::EnumTypeExtension::values,
     );
 
     let mut seen: HashMap<&str, &EnumValueDefinition> = HashMap::new();
-    for enum_val in enum_def.self_values() {
+    for enum_val in enum_values {
         diagnostics.extend(db.validate_enum_value(enum_val.clone()));
 
         // An Enum type must define one or more unique enum values.
@@ -42,7 +59,7 @@ pub fn validate_enum_definition(
                     db,
                     redefined_definition.into(),
                     DiagnosticData::UniqueDefinition {
-                        ty: "enum",
+                        ty: "enum value",
                         name: value.into(),
                         original_definition: original_definition.into(),
                         redefined_definition: redefined_definition.into(),
@@ -72,6 +89,8 @@ pub(crate) fn validate_enum_value(
     let mut diagnostics = db.validate_directives(
         enum_val.directives().to_vec(),
         hir::DirectiveLocation::EnumValue,
+        // enum values don't use variables
+        Arc::new(Vec::new()),
     );
 
     // (convention) Values in an Enum Definition should be capitalized.

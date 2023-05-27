@@ -200,6 +200,21 @@ pub(crate) fn operation_inline_fragment_fields(
     Arc::new(fields)
 }
 
+pub(crate) fn operation_fragment_references(
+    db: &dyn HirDatabase,
+    selection_set: SelectionSet,
+) -> Arc<Vec<Arc<FragmentDefinition>>> {
+    let fields = selection_set
+        .selection()
+        .iter()
+        .filter_map(|sel| match sel {
+            Selection::FragmentSpread(fragment_spread) => Some(fragment_spread.fragment(db)?),
+            _ => None,
+        })
+        .collect();
+    Arc::new(fields)
+}
+
 pub(crate) fn operation_fragment_spread_fields(
     db: &dyn HirDatabase,
     selection_set: SelectionSet,
@@ -278,11 +293,11 @@ pub(crate) fn selection_variables(
 pub(crate) fn get_field_variable_value(val: Value) -> Vec<Variable> {
     match val {
         Value::Variable(var) => vec![var],
-        Value::List(list) => list
+        Value::List { value: list, .. } => list
             .iter()
             .flat_map(|val| get_field_variable_value(val.clone()))
             .collect(),
-        Value::Object(obj) => obj
+        Value::Object { value: obj, .. } => obj
             .iter()
             .flat_map(|val| get_field_variable_value(val.1.clone()))
             .collect(),
@@ -342,7 +357,7 @@ pub(crate) fn subtype_map(db: &dyn HirDatabase) -> Arc<HashMap<String, HashSet<S
             add(name, member.name());
         }
         for extension in definition.extensions() {
-            for member in extension.union_members() {
+            for member in extension.members() {
                 add(name, member.name());
             }
         }

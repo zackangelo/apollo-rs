@@ -8,7 +8,7 @@
             file_id: FileId {
                 id: 72,
             },
-            offset: 218,
+            offset: 630,
             length: 33,
         },
         labels: [
@@ -17,7 +17,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 199,
+                    offset: 611,
                     length: 15,
                 },
                 text: "field `doesKnowCommand` provides one argument value here",
@@ -27,7 +27,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 234,
+                    offset: 646,
                     length: 16,
                 },
                 text: "but a different value here",
@@ -42,14 +42,14 @@
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 183,
+                offset: 595,
                 length: 32,
             },
             redefined_selection: DiagnosticLocation {
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 218,
+                offset: 630,
                 length: 33,
             },
         },
@@ -63,8 +63,8 @@
             file_id: FileId {
                 id: 72,
             },
-            offset: 337,
-            length: 40,
+            offset: 630,
+            length: 33,
         },
         labels: [
             Label {
@@ -72,7 +72,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 318,
+                    offset: 611,
                     length: 15,
                 },
                 text: "field `doesKnowCommand` provides one argument value here",
@@ -82,7 +82,62 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 353,
+                    offset: 646,
+                    length: 16,
+                },
+                text: "but a different value here",
+            },
+        ],
+        help: Some(
+            "Fields with the same response name must provide the same set of arguments. Consider adding an alias if you need to select fields with different arguments.",
+        ),
+        data: ConflictingField {
+            field: "doesKnowCommand",
+            original_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 595,
+                length: 32,
+            },
+            redefined_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 630,
+                length: 33,
+            },
+        },
+    },
+    ApolloDiagnostic {
+        cache: {
+            0: "built_in_types.graphql",
+            72: "0075_merge_conflicting_args.graphql",
+        },
+        location: DiagnosticLocation {
+            file_id: FileId {
+                id: 72,
+            },
+            offset: 749,
+            length: 40,
+        },
+        labels: [
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 730,
+                    length: 15,
+                },
+                text: "field `doesKnowCommand` provides one argument value here",
+            },
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 765,
                     length: 23,
                 },
                 text: "but a different value here",
@@ -97,14 +152,14 @@
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 302,
+                offset: 714,
                 length: 32,
             },
             redefined_selection: DiagnosticLocation {
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 337,
+                offset: 749,
                 length: 40,
             },
         },
@@ -118,7 +173,62 @@
             file_id: FileId {
                 id: 72,
             },
-            offset: 464,
+            offset: 749,
+            length: 40,
+        },
+        labels: [
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 730,
+                    length: 15,
+                },
+                text: "field `doesKnowCommand` provides one argument value here",
+            },
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 765,
+                    length: 23,
+                },
+                text: "but a different value here",
+            },
+        ],
+        help: Some(
+            "Fields with the same response name must provide the same set of arguments. Consider adding an alias if you need to select fields with different arguments.",
+        ),
+        data: ConflictingField {
+            field: "doesKnowCommand",
+            original_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 714,
+                length: 32,
+            },
+            redefined_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 749,
+                length: 40,
+            },
+        },
+    },
+    ApolloDiagnostic {
+        cache: {
+            0: "built_in_types.graphql",
+            72: "0075_merge_conflicting_args.graphql",
+        },
+        location: DiagnosticLocation {
+            file_id: FileId {
+                id: 72,
+            },
+            offset: 876,
             length: 36,
         },
         labels: [
@@ -127,7 +237,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 441,
+                    offset: 853,
                     length: 19,
                 },
                 text: "field `doesKnowCommand` provides one argument value here",
@@ -137,7 +247,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 480,
+                    offset: 892,
                     length: 19,
                 },
                 text: "but a different value here",
@@ -152,14 +262,14 @@
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 425,
+                offset: 837,
                 length: 36,
             },
             redefined_selection: DiagnosticLocation {
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 464,
+                offset: 876,
                 length: 36,
             },
         },
@@ -173,7 +283,62 @@
             file_id: FileId {
                 id: 72,
             },
-            offset: 573,
+            offset: 876,
+            length: 36,
+        },
+        labels: [
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 853,
+                    length: 19,
+                },
+                text: "field `doesKnowCommand` provides one argument value here",
+            },
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 892,
+                    length: 19,
+                },
+                text: "but a different value here",
+            },
+        ],
+        help: Some(
+            "Fields with the same response name must provide the same set of arguments. Consider adding an alias if you need to select fields with different arguments.",
+        ),
+        data: ConflictingField {
+            field: "doesKnowCommand",
+            original_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 837,
+                length: 36,
+            },
+            redefined_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 876,
+                length: 36,
+            },
+        },
+    },
+    ApolloDiagnostic {
+        cache: {
+            0: "built_in_types.graphql",
+            72: "0075_merge_conflicting_args.graphql",
+        },
+        location: DiagnosticLocation {
+            file_id: FileId {
+                id: 72,
+            },
+            offset: 985,
             length: 15,
         },
         labels: [
@@ -182,7 +347,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 554,
+                    offset: 966,
                     length: 15,
                 },
                 text: "field `doesKnowCommand` is selected with argument `dogCommand` here",
@@ -192,7 +357,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 573,
+                    offset: 985,
                     length: 15,
                 },
                 text: "but argument `dogCommand` is not provided here",
@@ -207,14 +372,14 @@
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 538,
+                offset: 950,
                 length: 32,
             },
             redefined_selection: DiagnosticLocation {
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 573,
+                offset: 985,
                 length: 15,
             },
         },
@@ -228,7 +393,62 @@
             file_id: FileId {
                 id: 72,
             },
-            offset: 649,
+            offset: 985,
+            length: 15,
+        },
+        labels: [
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 966,
+                    length: 15,
+                },
+                text: "field `doesKnowCommand` is selected with argument `dogCommand` here",
+            },
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 985,
+                    length: 15,
+                },
+                text: "but argument `dogCommand` is not provided here",
+            },
+        ],
+        help: Some(
+            "Fields with the same response name must provide the same set of arguments. Consider adding an alias if you need to select fields with different arguments.",
+        ),
+        data: ConflictingField {
+            field: "doesKnowCommand",
+            original_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 950,
+                length: 32,
+            },
+            redefined_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 985,
+                length: 15,
+            },
+        },
+    },
+    ApolloDiagnostic {
+        cache: {
+            0: "built_in_types.graphql",
+            72: "0075_merge_conflicting_args.graphql",
+        },
+        location: DiagnosticLocation {
+            file_id: FileId {
+                id: 72,
+            },
+            offset: 1061,
             length: 18,
         },
         labels: [
@@ -237,7 +457,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 641,
+                    offset: 1053,
                     length: 4,
                 },
                 text: "field `isAtLocation` is selected with argument `x` here",
@@ -247,7 +467,7 @@
                     file_id: FileId {
                         id: 72,
                     },
-                    offset: 649,
+                    offset: 1061,
                     length: 18,
                 },
                 text: "but argument `x` is not provided here",
@@ -262,14 +482,69 @@
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 628,
+                offset: 1040,
                 length: 18,
             },
             redefined_selection: DiagnosticLocation {
                 file_id: FileId {
                     id: 72,
                 },
-                offset: 649,
+                offset: 1061,
+                length: 18,
+            },
+        },
+    },
+    ApolloDiagnostic {
+        cache: {
+            0: "built_in_types.graphql",
+            72: "0075_merge_conflicting_args.graphql",
+        },
+        location: DiagnosticLocation {
+            file_id: FileId {
+                id: 72,
+            },
+            offset: 1061,
+            length: 18,
+        },
+        labels: [
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 1053,
+                    length: 4,
+                },
+                text: "field `isAtLocation` is selected with argument `x` here",
+            },
+            Label {
+                location: DiagnosticLocation {
+                    file_id: FileId {
+                        id: 72,
+                    },
+                    offset: 1061,
+                    length: 18,
+                },
+                text: "but argument `x` is not provided here",
+            },
+        ],
+        help: Some(
+            "Fields with the same response name must provide the same set of arguments. Consider adding an alias if you need to select fields with different arguments.",
+        ),
+        data: ConflictingField {
+            field: "isAtLocation",
+            original_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 1040,
+                length: 18,
+            },
+            redefined_selection: DiagnosticLocation {
+                file_id: FileId {
+                    id: 72,
+                },
+                offset: 1061,
                 length: 18,
             },
         },

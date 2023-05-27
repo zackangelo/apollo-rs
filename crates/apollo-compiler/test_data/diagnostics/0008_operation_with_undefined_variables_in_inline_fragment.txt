@@ -8,8 +8,8 @@
             file_id: FileId {
                 id: 8,
             },
-            offset: 91,
-            length: 6,
+            offset: 81,
+            length: 16,
         },
         labels: [
             Label {
@@ -24,7 +24,7 @@
             },
         ],
         help: None,
-        data: UndefinedDefinition {
+        data: UndefinedVariable {
             name: "value",
         },
     },

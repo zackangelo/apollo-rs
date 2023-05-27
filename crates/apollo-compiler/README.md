@@ -23,16 +23,17 @@
     * Validation is a work in progress, stay tuned for further validation rules implementation.
 
 ## Getting started
-Add this to your `Cargo.toml` to start using `apollo-compiler`:
+Add the dependency to start using `apollo-compiler`:
+```bash
+cargo add apollo-compiler
+```
+
+Or add this to your `Cargo.toml` for a manual installation:
+
 ```toml
 # Just an example, change to the necessary package version.
 [dependencies]
-apollo-compiler = "0.7.1"
-```
-
-Or using [cargo-edit]:
-```bash
-cargo add apollo-compiler
+apollo-compiler = "0.9.2"
 ```
 
 ## Rust versions
@@ -98,29 +99,18 @@ use miette::Result;
 
 fn main() -> Result<()> {
     let schema_input = r#"
-    type Query {
-      topProducts: Product
-      customer: User
-    }
-
-    type Product {
-      type: String
-      price(setPrice: Int): Int
-    }
-
     type User {
       id: ID
       name: String
       profilePic(size: Int): URL
     }
 
+    schema { query: User }
+
     scalar URL @specifiedBy(url: "https://tools.ietf.org/html/rfc3986")
     "#;
     let query_input = r#"
-    query getProduct {
-      topProducts {
-          type
-      }
+    query getUser {
       ... vipCustomer
     }
 
@@ -142,8 +132,8 @@ fn main() -> Result<()> {
     }
     assert!(diagnostics.is_empty());
 
-    let op = compiler.db.find_operation(query_id, Some("getProduct".into()))
-        .expect("getProduct query does not exist");
+    let op = compiler.db.find_operation(query_id, Some("getUser".into()))
+        .expect("getUser query does not exist");
     let fragment_in_op: Vec<hir::FragmentDefinition> = op.selection_set().selection().iter().filter_map(|sel| match sel {
         hir::Selection::FragmentSpread(frag) => {
             Some(frag.fragment(&compiler.db)?.as_ref().clone())
@@ -310,5 +300,4 @@ Licensed under either of
 
 at your option.
 
-[cargo-edit]: https://github.com/killercup/cargo-edit
 [`salsa`]: https://docs.rs/salsa/latest/salsa/

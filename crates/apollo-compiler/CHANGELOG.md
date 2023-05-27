@@ -15,8 +15,211 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Fixes
 
 ## Maintenance
-
 ## Documentation -->
+# [0.9.2](https://crates.io/crates/apollo-compiler/0.9.2) - 2023-05-23
+
+## Features
+- add `as_$type()` methods to `hir::Value`, by [goto-bus-stop] in [pull/564]
+
+  These methods simplify casting the `hir::Value` enum to single Rust types.
+  Added methods:
+
+  - `hir::Value::as_i32() -> Option<i32>`
+  - `hir::Value::as_f64() -> Option<f64>`
+  - `hir::Value::as_str() -> Option<&str>`
+  - `hir::Value::as_bool() -> Option<bool>`
+  - `hir::Value::as_list() -> Option<&Vec<Value>>`
+  - `hir::Value::as_object() -> Option<&Vec<(Name, Value)>>`
+  - `hir::Value::as_variable() -> Option<&Variable>`
+
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[pull/564]: https://github.com/apollographql/apollo-rs/pull/564
+
+## Fixes
+-  non-nullable variables should be accepted for nullable args, by [lrlna] in [pull/565]
+
+   Fixes several `null`-related issues from 0.9.0.
+
+-  add an `UndefinedVariable` diagnostic, by [goto-bus-stop] in [pull/563]
+
+   Previously undefined variables were reported with an `UndefinedDefinition` diagnostic.
+   Splitting it up lets us provide a better error message for missing variables.
+
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[lrlna]: https://github.com/lrlna
+[pull/563]: https://github.com/apollographql/apollo-rs/pull/563
+[pull/565]: https://github.com/apollographql/apollo-rs/pull/565
+
+# [0.9.1](https://crates.io/crates/apollo-compiler/0.9.1) - 2023-05-19
+
+## Fixes
+- Update the apollo-parser dependency version, by [goto-bus-stop] in [pull/559]
+
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[pull/559]: https://github.com/apollographql/apollo-rs/pull/559
+
+# [0.9.0](https://crates.io/crates/apollo-compiler/0.9.0) - 2023-05-12
+
+This release completes GraphQL validation specification, making the compiler spec-compliant.
+
+You can validate the entire corpus of the compiler, or run individual compiler validation rules. The example below runs the whole corpus, as well specifically runs `compiler.db.validate_executable(file_id)` for each of the two defined operations.
+
+```rust
+let schema = r#"
+type Query {
+  cat: Cat
+}
+
+type Cat{
+  name: String!
+  nickname: String
+  purrVolume: Int
+  doesKnowCommand(catCommand: CatCommand!): Boolean!
+}
+
+enum CatCommand {
+  HOP
+}
+    "#;
+
+let cat_name_op = r#"
+query getCatName {
+  cat {
+    name
+  }
+}
+    "#;
+
+let cat_command_op = r#"
+query getCatName {
+  cat {
+    doesNotKnowCommand
+  }
+}
+    "#;
+let mut compiler = ApolloCompiler::new();
+compiler.add_type_system(schema, "schema.graphl");
+let cat_name_file = compiler.add_executable(cat_name_op, "cat_name_op.graphql");
+let cat_command_file = compiler.add_executable(cat_command_op, "cat_command_op.graphql");
+
+// validate both the operation and the type system
+let all_diagnostics = compiler.validate();
+assert_eq!(all_diagnostics.len(), 1);
+
+// validate just the executables individual
+let cat_name_op_diagnotics = compiler.db.validate_executable(cat_name_file);
+assert!(cat_name_op_diagnotics.is_empty());
+
+let cat_command_op_diagnotics = compiler.db.validate_executable(cat_command_file);
+// This one has an error, where a field queries is not defined.
+assert_eq!(cat_command_op_diagnotics.len(), 1);
+for diag in cat_command_op_diagnotics {
+    println!("{}", diag);
+}
+```
+
+## BREAKING
+- remove `impl Default` for ApolloCompiler, by [dariuszkuc] in [pull/542]
+- align HIR extension getters to those of their type definition, by [lrlna] in [pull/540]
+
+  The following methods were changed:
+    - `InputObjectTypeExtension.fields_definition()` -> `InputObjectTypeDefinition.fields()`
+    - `ObjectTypeExtension.fields_definition()` -> `ObjectTypeExtension.fields()`
+    - `InterfaceTypeExtension.fields_definition()` -> `InterfaceTypeExtension.fields()`
+    - `EnumTypeExtension.enum_values_definition()` -> `EnumTypeExtension.values()`
+    - `UnionTypeExtension.union_members()` -> `UnionTypeExtension.members()`
+
+## Features
+- validate values are of correct type, by [lrlna]  in [pull/550]
+- support the built-in `@deprecated` directive on arguments and input values, by [goto-bus-stop] in [pull/518]
+- validate that variable usage is allowed, by [lrlna] in [pull/537]
+- validate executable documents do not contain type definitions, by [goto-bus-stop] in [pull/535]
+- validate union extensions, by [goto-bus-stop] in [pull/534]
+- validate input object extensions, by [goto-bus-stop] in [pull/533]
+- validate interface extensions, by [goto-bus-stop] in [pull/532]
+- validate enum extensions, by [goto-bus-stop] in [pull/528]
+- validate object type extensions, by [goto-bus-stop] in [pull/524]
+- validate fragment spread is possible, by [goto-bus-stop] in [pull/511]
+
+## Fixes
+- fix recursion cycle in `is_introspection` HIR getter, by [allancalix] and [goto-bus-stop] in [pull/544] and [pull/552]
+
+[lrlna]: https://github.com/lrlna
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[allancalix]: https://github.com/allancalix
+[pull/511]: https://github.com/apollographql/apollo-rs/pull/511
+[pull/524]: https://github.com/apollographql/apollo-rs/pull/524
+[pull/518]: https://github.com/apollographql/apollo-rs/pull/518
+[pull/528]: https://github.com/apollographql/apollo-rs/pull/528
+[pull/532]: https://github.com/apollographql/apollo-rs/pull/532
+[pull/533]: https://github.com/apollographql/apollo-rs/pull/533
+[pull/534]: https://github.com/apollographql/apollo-rs/pull/534
+[pull/535]: https://github.com/apollographql/apollo-rs/pull/535
+[pull/537]: https://github.com/apollographql/apollo-rs/pull/537
+[pull/540]: https://github.com/apollographql/apollo-rs/pull/540
+[pull/542]: https://github.com/apollographql/apollo-rs/pull/542
+[pull/544]: https://github.com/apollographql/apollo-rs/pull/544
+[pull/550]: https://github.com/apollographql/apollo-rs/pull/550
+[pull/552]: https://github.com/apollographql/apollo-rs/pull/552
+
+# [0.8.0](https://crates.io/crates/apollo-compiler/0.8.0) - 2023-04-13
+## BREAKING
+There is now an API to set parser's token limits via `apollo-compiler`. To
+accommodate an additional limit, we changed the API to set several limits
+simultaneously.
+
+```rust
+let op = r#"
+    query {
+        a {
+            a {
+                a {
+                    a
+                }
+            }
+        }
+    }
+"#;
+let mut compiler = ApolloCompiler::new().token_limit(22).recursion_limit(10);
+compiler.add_executable(op, "op.graphql");
+let errors = compiler.db.syntax_errors();
+
+assert_eq!(errors.len(), 1)
+```
+by [lrlna] in [pull/512]
+
+## Features
+- validate fragment definitions are used, by [gocamille] in [pull/483]
+- validate fragment type condition exists in the type system and are declared on composite types, by [gocamille] in [pull/483]
+- validate fragment definitions do not contain cycles, by [goto-bus-stop] in [pull/518]
+
+## Fixes
+- fix duplicate directive location info, by [goto-bus-stop]  in [pull/516]
+- use `LimitExceeded` diagnostic for limit related errors, by [lrlna] in [pull/520]
+
+[lrlna]: https://github.com/lrlna
+[gocamille]: https://github.com/gocamille
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[pull/483]: https://github.com/apollographql/apollo-rs/pull/483
+[pull/512]: https://github.com/apollographql/apollo-rs/pull/512
+[pull/516]: https://github.com/apollographql/apollo-rs/pull/516
+[pull/518]: https://github.com/apollographql/apollo-rs/pull/518
+[pull/520]: https://github.com/apollographql/apollo-rs/pull/520
+
+# [0.7.2](https://crates.io/crates/apollo-compiler/0.7.2) - 2023-04-03
+
+## Features
+- validate fragment spread target is defined, by [goto-bus-stop] in [pull/506]
+- validate circular input objects, by [lrlna] in [pull/505]
+
+## Fixes
+- `db.interfaces()` checks pre-computed hir for interfaces first, by [lrlna] in [de4baea]
+
+[lrlna]: https://github.com/lrlna
+[goto-bus-stop]: https://github.com/goto-bus-stop
+[de4baea]: https://github.com/apollographql/apollo-rs/commit/de4baea13745089ace3821bccc30cf1c4008ba20
+[pull/505]: https://github.com/apollographql/apollo-rs/pull/505
+[pull/506]: https://github.com/apollographql/apollo-rs/pull/506
 
 # [0.7.1](https://crates.io/crates/apollo-compiler/0.7.1) - 2023-03-28
 

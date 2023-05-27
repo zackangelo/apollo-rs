@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::{
     diagnostics::{ApolloDiagnostic, DiagnosticData, Label},
@@ -15,11 +18,25 @@ pub fn validate_interface_definitions(db: &dyn ValidationDatabase) -> Vec<Apollo
         diagnostics.extend(db.validate_directives(
             def.directives().cloned().collect(),
             hir::DirectiveLocation::Interface,
+            // interfaces don't use variables
+            Arc::new(Vec::new()),
         ));
         diagnostics.extend(db.validate_interface_definition(def.clone()));
     }
 
     diagnostics
+}
+
+fn collect_nodes<'a, Item: Clone, Ext>(
+    base: &'a [Item],
+    extensions: &'a [Arc<Ext>],
+    method: impl Fn(&'a Ext) -> &'a [Item],
+) -> Vec<Item> {
+    let mut nodes = base.to_vec();
+    for ext in extensions {
+        nodes.extend(method(ext).iter().cloned());
+    }
+    nodes
 }
 
 pub fn validate_interface_definition(
@@ -67,11 +84,21 @@ pub fn validate_interface_definition(
     }
 
     // Interface Type field validation.
-    diagnostics.extend(db.validate_field_definitions(interface_def.self_fields().to_vec()));
+    let field_definitions = collect_nodes(
+        interface_def.self_fields(),
+        interface_def.extensions(),
+        hir::InterfaceTypeExtension::fields,
+    );
+    diagnostics.extend(db.validate_field_definitions(field_definitions));
 
     // Implements Interfaceds validation.
+    let implements_interfaces = collect_nodes(
+        interface_def.self_implements_interfaces(),
+        interface_def.extensions(),
+        hir::InterfaceTypeExtension::implements_interfaces,
+    );
     diagnostics.extend(
-        db.validate_implements_interfaces(interface_def.self_implements_interfaces().to_vec()),
+        db.validate_implements_interfaces(interface_def.name().to_string(), implements_interfaces),
     );
 
     // When defining an interface that implements another interface, the
@@ -80,18 +107,16 @@ pub fn validate_interface_definition(
     //
     // Returns a Missing Field error.
     let fields: HashSet<ValidationSet> = interface_def
-        .self_fields()
-        .iter()
+        .fields()
         .map(|field| ValidationSet {
             name: field.name().into(),
             loc: field.loc(),
         })
         .collect();
-    for implements_interface in interface_def.self_implements_interfaces().iter() {
+    for implements_interface in interface_def.implements_interfaces() {
         if let Some(super_interface) = implements_interface.interface_definition(db.upcast()) {
             let implements_interface_fields: HashSet<ValidationSet> = super_interface
-                .self_fields()
-                .iter()
+                .fields()
                 .map(|field| ValidationSet {
                     name: field.name().into(),
                     loc: field.loc(),
@@ -131,6 +156,7 @@ pub fn validate_interface_definition(
 
 pub fn validate_implements_interfaces(
     db: &dyn ValidationDatabase,
+    implementor_name: String,
     impl_interfaces: Vec<ImplementsInterface>,
 ) -> Vec<ApolloDiagnostic> {
     let mut diagnostics = Vec::new();
@@ -214,6 +240,33 @@ pub fn validate_implements_interfaces(
                 format!("{} must also be implemented here", undefined.name),
             )),
         );
+    }
+
+    let mut seen = HashMap::<&str, &ImplementsInterface>::new();
+    for impl_interface in &impl_interfaces {
+        let name = impl_interface.interface();
+        if let Some(original) = seen.get(&name) {
+            diagnostics.push(
+                ApolloDiagnostic::new(
+                    db,
+                    impl_interface.loc().into(),
+                    DiagnosticData::DuplicateImplementsInterface {
+                        ty: implementor_name.clone(),
+                        interface: name.to_string(),
+                    },
+                )
+                .label(Label::new(
+                    original.loc(),
+                    format!("`{name}` interface implementation previously declared here"),
+                ))
+                .label(Label::new(
+                    impl_interface.loc(),
+                    format!("`{name}` interface implementation declared again here"),
+                )),
+            );
+        } else {
+            seen.insert(name, impl_interface);
+        }
     }
 
     diagnostics

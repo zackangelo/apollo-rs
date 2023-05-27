@@ -8,8 +8,8 @@
             file_id: FileId {
                 id: 9,
             },
-            offset: 192,
-            length: 6,
+            offset: 173,
+            length: 16,
         },
         labels: [
             Label {
@@ -17,44 +17,15 @@
                     file_id: FileId {
                         id: 9,
                     },
-                    offset: 192,
+                    offset: 183,
                     length: 6,
                 },
                 text: "not found in this scope",
             },
         ],
         help: None,
-        data: UndefinedDefinition {
+        data: UndefinedVariable {
             name: "value",
-        },
-    },
-    ApolloDiagnostic {
-        cache: {
-            0: "built_in_types.graphql",
-            9: "0009_operation_with_undefined_variables_in_fragment.graphql",
-        },
-        location: DiagnosticLocation {
-            file_id: FileId {
-                id: 9,
-            },
-            offset: 19,
-            length: 14,
-        },
-        labels: [
-            Label {
-                location: DiagnosticLocation {
-                    file_id: FileId {
-                        id: 9,
-                    },
-                    offset: 19,
-                    length: 14,
-                },
-                text: "this variable is never used",
-            },
-        ],
-        help: None,
-        data: UnusedVariable {
-            name: "variable",
         },
     },
 ]

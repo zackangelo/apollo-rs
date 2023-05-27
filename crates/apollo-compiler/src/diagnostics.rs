@@ -141,8 +141,12 @@ impl fmt::Display for ApolloDiagnostic {
 pub enum DiagnosticData {
     #[error("syntax error: {message}")]
     SyntaxError { message: String },
+    #[error("limit exceeded: {message}")]
+    LimitExceeded { message: String },
     #[error("expected identifier")]
     MissingIdent,
+    #[error("executable documents must not contain {kind}")]
+    ExecutableDefinition { kind: &'static str },
     #[error("the {ty} `{name}` is defined multiple times in the document")]
     UniqueDefinition {
         ty: &'static str,
@@ -186,6 +190,23 @@ pub enum DiagnosticData {
         /// Name of the type not in scope
         name: String,
     },
+    #[error("variable `{name}` is not defined")]
+    UndefinedVariable {
+        /// Name of the variable not in scope
+        name: String,
+    },
+    #[error("cannot find fragment `{name}` in this document")]
+    UndefinedFragment {
+        /// Name of the fragment not in scope
+        name: String,
+    },
+    #[error("value `{value}` does not exist on `{definition}` type")]
+    UndefinedValue {
+        /// Value of the enum that doesn't exist
+        value: String,
+        /// type definition
+        definition: String,
+    },
     #[error("type extension for `{name}` is the wrong kind")]
     WrongTypeExtension {
         /// Name of the type being extended
@@ -201,6 +222,8 @@ pub enum DiagnosticData {
     RecursiveInterfaceDefinition { name: String },
     #[error("`{name}` input object cannot reference itself")]
     RecursiveInputObjectDefinition { name: String },
+    #[error("`{name}` fragment cannot reference itself")]
+    RecursiveFragmentDefinition { name: String },
     #[error("values in an Enum Definition should be capitalized")]
     CapitalizedValue { value: String },
     #[error("fields must be unique in a definition")]
@@ -217,6 +240,8 @@ pub enum DiagnosticData {
     },
     #[error("the required argument `{name}` is not provided")]
     RequiredArgument { name: String },
+    #[error("type `{ty}` can only implement interface `{interface}` once")]
+    DuplicateImplementsInterface { ty: String, interface: String },
     #[error(
         "Transitively implemented interfaces must also be defined on an implementing interface or object"
     )]
@@ -264,6 +289,18 @@ pub enum DiagnosticData {
         /// The source location where the directive that's being used was defined.
         directive_def: DiagnosticLocation,
     },
+    #[error("{ty} cannot be represented by a {value} value")]
+    UnsupportedValueType {
+        // input value
+        value: String,
+        // defined type
+        ty: String,
+    },
+    #[error("int cannot represent non 32-bit signed integer value")]
+    IntCoercionError {
+        /// The int value that cannot be coerced
+        value: String,
+    },
     #[error("non-repeatable directive {name} can only be used once per location")]
     UniqueDirective {
         /// Name of the non-unique directive.
@@ -287,10 +324,36 @@ pub enum DiagnosticData {
         original_selection: DiagnosticLocation,
         redefined_selection: DiagnosticLocation,
     },
-    #[error("cannot find fragment `{name}` in this document")]
-    UndefinedFragment {
-        /// Name of the fragment not in scope
+    #[error("fragments must be specified on types that exist in the schema")]
+    InvalidFragment {
+        /// Name of the type on which the fragment is declared
+        ty: Option<String>,
+    },
+    #[error("fragments can not be declared on primitive types")]
+    InvalidFragmentTarget {
+        /// Name of the type on which the fragment is declared
+        ty: String,
+    },
+    #[error("fragment cannot be applied to this type")]
+    InvalidFragmentSpread {
+        /// Fragment name or None if it's an inline fragment
+        name: Option<String>,
+        /// Type name the fragment is being applied to
+        type_name: String,
+    },
+    #[error("fragment `{name}` must be used in an operation")]
+    UnusedFragment {
+        /// Name of the fragment
         name: String,
+    },
+    #[error(
+        "variable `{var_name}` cannot be used for argument `{arg_name}` as their types mismatch"
+    )]
+    DisallowedVariableUsage {
+        /// Name of the variable being used in an argument
+        var_name: String,
+        /// Name of the argument where variable is used
+        arg_name: String,
     },
 }
 

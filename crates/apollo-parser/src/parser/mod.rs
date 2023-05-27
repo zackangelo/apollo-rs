@@ -124,7 +124,7 @@ impl<'a> Parser<'a> {
         let builder = Rc::try_unwrap(self.builder)
             .expect("More than one reference to builder left")
             .into_inner();
-        builder.finish(self.errors, self.recursion_limit)
+        builder.finish(self.errors, self.recursion_limit, self.lexer.limit_tracker)
     }
 
     /// Check if the current token is `kind`.
@@ -495,7 +495,7 @@ mod tests {
         let parser = Parser::new(source).recursion_limit(3).token_limit(200);
         let ast = parser.parse();
         let errors = ast.errors().collect::<Vec<_>>();
-        assert_eq!(errors, &[&Error::limit("parser limit(3) reached", 61),]);
+        assert_eq!(errors, &[&Error::limit("parser limit(3) reached", 121),]);
     }
 
     #[test]
@@ -522,8 +522,6 @@ mod tests {
         );
         assert_eq!(errors.next(), None);
 
-        // TODO(@goto-bus-stop) the comment is positioned wrong:
-        // https://github.com/apollographql/apollo-rs/issues/362
         let tree = expect![[r##"
             DOCUMENT@0..113
               WHITESPACE@0..13 "\n            "
@@ -588,5 +586,13 @@ mod tests {
             interface_def,
             Definition::InterfaceTypeDefinition(_)
         ));
+    }
+
+    #[test]
+    fn token_limit() {
+        let ast = Parser::new("type Query { a a a a a a a a a }")
+            .token_limit(100)
+            .parse();
+        assert_eq!(ast.token_limit().high, 25);
     }
 }

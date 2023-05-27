@@ -77,6 +77,18 @@ pub fn validate_input_object_definitions(db: &dyn ValidationDatabase) -> Vec<Apo
     diagnostics
 }
 
+fn collect_nodes<'a, Item: Clone, Ext>(
+    base: &'a [Item],
+    extensions: &'a [Arc<Ext>],
+    method: impl Fn(&'a Ext) -> &'a [Item],
+) -> Vec<Item> {
+    let mut nodes = base.to_vec();
+    for ext in extensions {
+        nodes.extend(method(ext).iter().cloned());
+    }
+    nodes
+}
+
 pub fn validate_input_object_definition(
     db: &dyn ValidationDatabase,
     input_obj: Arc<hir::InputObjectTypeDefinition>,
@@ -84,6 +96,8 @@ pub fn validate_input_object_definition(
     let mut diagnostics = db.validate_directives(
         input_obj.directives().cloned().collect(),
         hir::DirectiveLocation::InputObject,
+        // input objects don't use variables
+        Arc::new(Vec::new()),
     );
 
     if let Err(input_val) = FindRecursiveInputValue::check(db, input_obj.as_ref()) {
@@ -109,8 +123,13 @@ pub fn validate_input_object_definition(
     // Fields in an Input Object Definition must be unique
     //
     // Returns Unique Definition error.
+    let fields = collect_nodes(
+        input_obj.input_fields_definition.as_ref(),
+        input_obj.extensions(),
+        hir::InputObjectTypeExtension::fields,
+    );
     diagnostics.extend(db.validate_input_values(
-        input_obj.input_fields_definition.clone(),
+        Arc::new(fields),
         hir::DirectiveLocation::InputFieldDefinition,
     ));
 
@@ -127,7 +146,12 @@ pub fn validate_input_values(
     let mut seen: HashMap<&str, &hir::InputValueDefinition> = HashMap::new();
 
     for input_value in input_values.iter() {
-        diagnostics.extend(db.validate_directives(input_value.directives().to_vec(), dir_loc));
+        diagnostics.extend(db.validate_directives(
+            input_value.directives().to_vec(),
+            dir_loc,
+            // input values don't use variables
+            Arc::new(Vec::new()),
+        ));
 
         let name = input_value.name();
         if let Some(prev_value) = seen.get(name) {

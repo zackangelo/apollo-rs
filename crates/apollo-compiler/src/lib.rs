@@ -21,7 +21,7 @@ pub struct ApolloCompiler {
 /// A read-only, `Sync` snapshot of the database.
 pub type Snapshot = salsa::Snapshot<RootDatabase>;
 
-/// Apollo compiler creates a context around your GraphQL. It creates refernces
+/// Apollo compiler creates a context around your GraphQL. It creates references
 /// between various GraphQL types in scope.
 ///
 /// ## Example
@@ -68,18 +68,44 @@ pub type Snapshot = salsa::Snapshot<RootDatabase>;
 /// }
 /// assert!(diagnostics.is_empty());
 /// ```
+#[allow(clippy::new_without_default)]
 impl ApolloCompiler {
     /// Create a new instance of Apollo Compiler.
     pub fn new() -> Self {
-        Default::default()
+        let mut db = RootDatabase::default();
+        // TODO(@goto-bus-stop) can we make salsa fill in these defaults for us…?
+        db.set_recursion_limit(None);
+        db.set_token_limit(None);
+        db.set_type_system_hir_input(None);
+        db.set_source_files(vec![]);
+
+        Self { db }
     }
 
-    /// Create a new instance of Apollo Compiler,
-    /// and configure the parser with the given recursion limit.
-    pub fn with_recursion_limit(limit: usize) -> Self {
-        let mut compiler = Self::new();
-        compiler.db.set_recursion_limit(Some(limit));
-        compiler
+    /// Configure the recursion limit to use during parsing.
+    /// Recursion limit must be set prior to adding sources to the compiler.
+    pub fn recursion_limit(mut self, limit: usize) -> Self {
+        if !self.db.source_files().is_empty() {
+            panic!(
+                "There are already parsed files in the compiler. \
+                 Setting recursion limit after files are parsed is not supported."
+            );
+        }
+        self.db.set_recursion_limit(Some(limit));
+        self
+    }
+
+    /// Configure the token limit to use during parsing.
+    /// Token limit must be set prior to adding sources to the compiler.
+    pub fn token_limit(mut self, limit: usize) -> Self {
+        if !self.db.source_files().is_empty() {
+            panic!(
+                "There are already parsed files in the compiler. \
+                 Setting token limit after files are parsed is not supported."
+            );
+        }
+        self.db.set_token_limit(Some(limit));
+        self
     }
 
     /// Add or update a pre-computed input for type system definitions
@@ -227,18 +253,6 @@ impl ApolloCompiler {
     }
 }
 
-impl Default for ApolloCompiler {
-    fn default() -> Self {
-        let mut db = RootDatabase::default();
-        // TODO(@goto-bus-stop) can we make salsa fill in these defaults for us…?
-        db.set_recursion_limit(None);
-        db.set_type_system_hir_input(None);
-        db.set_source_files(vec![]);
-
-        Self { db }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -269,7 +283,6 @@ query ExampleQuery {
         let mut compiler = ApolloCompiler::new();
         compiler.add_document(schema, "schema.graphql");
         compiler.add_executable(query, "query.graphql");
-        dbg!(compiler.db.source_files());
     }
 
     #[test]
@@ -279,7 +292,7 @@ query ExampleQuery($definedVariable: Int, $definedVariable2: Int) {
   topProducts(first: $definedVariable) {
     type
   }
-  ... vipCustomer
+  customer { ... vipCustomer }
 }
 
 fragment vipCustomer on User {
@@ -629,7 +642,9 @@ query getProduct {
   topProducts {
     type
   }
-  ... vipCustomer
+  customer {
+    ... vipCustomer
+  }
 }
 
 fragment vipCustomer on User {
@@ -653,6 +668,10 @@ fragment vipCustomer on User {
             .db
             .find_operation(query_id, Some("getProduct".into()));
         let fragment_in_op: Vec<crate::hir::FragmentDefinition> = op
+            .unwrap()
+            .fields(&compiler.db)
+            .iter()
+            .find(|field| field.name() == "customer")
             .unwrap()
             .selection_set()
             .selection()
@@ -1271,39 +1290,39 @@ type Query {
         schema {
             query: Query
           }
-          
+
           type Query {
             peopleCount: Int!
             person: Person!
           }
-          
+
           interface Pet {
             name: String!
           }
-          
+
           type Dog implements Pet {
             name: String!
             dogBreed: DogBreed!
           }
-          
+
           type Cat implements Pet {
             name: String!
             catBreed: CatBreed!
           }
-          
+
           type Person {
             firstName: String!
             lastName: String!
             age: Int
             pets: [Pet!]!
           }
-          
+
           enum DogBreed {
             CHIHUAHUA
             RETRIEVER
             LAB
           }
-          
+
           enum CatBreed {
             TABBY
             MIX

@@ -7,7 +7,7 @@ use crate::{
     hir::*,
     validation::{
         argument, directive, enum_, extension, fragment, input_object, interface, object,
-        operation, scalar, schema, selection, union_, variable,
+        operation, scalar, schema, selection, union_, value, variable,
     },
     AstDatabase, FileId, HirDatabase, InputDatabase,
 };
@@ -79,6 +79,7 @@ pub trait ValidationDatabase:
     #[salsa::invoke(interface::validate_implements_interfaces)]
     fn validate_implements_interfaces(
         &self,
+        implementor_name: String,
         impl_interfaces: Vec<ImplementsInterface>,
     ) -> Vec<ApolloDiagnostic>;
 
@@ -90,6 +91,7 @@ pub trait ValidationDatabase:
         &self,
         dirs: Vec<Directive>,
         loc: DirectiveLocation,
+        var_defs: Arc<Vec<VariableDefinition>>,
     ) -> Vec<ApolloDiagnostic>;
 
     #[salsa::invoke(input_object::validate_input_object_definitions)]
@@ -145,7 +147,11 @@ pub trait ValidationDatabase:
     fn validate_field_definition(&self, field: FieldDefinition) -> Vec<ApolloDiagnostic>;
 
     #[salsa::invoke(field::validate_field)]
-    fn validate_field(&self, field: Arc<Field>) -> Vec<ApolloDiagnostic>;
+    fn validate_field(
+        &self,
+        field: Arc<Field>,
+        vars: Arc<Vec<VariableDefinition>>,
+    ) -> Vec<ApolloDiagnostic>;
 
     #[salsa::invoke(field::validate_leaf_field_selection)]
     fn validate_leaf_field_selection(
@@ -167,17 +173,67 @@ pub trait ValidationDatabase:
     #[salsa::invoke(operation::validate_operation_definitions)]
     fn validate_operation_definitions(&self, file_id: FileId) -> Vec<ApolloDiagnostic>;
 
-    #[salsa::invoke(fragment::validate_fragment_spread)]
-    fn validate_fragment_spread(&self, spread: Arc<FragmentSpread>) -> Vec<ApolloDiagnostic>;
+    /// Given a type definition, find all the types that can be used for fragment spreading.
+    ///
+    /// Spec: https://spec.graphql.org/October2021/#GetPossibleTypes()
+    #[salsa::invoke(fragment::get_possible_types)]
+    fn get_possible_types(&self, ty: TypeDefinition) -> Vec<TypeDefinition>;
 
-    #[salsa::invoke(fragment::validate_fragment_definitions)]
-    fn validate_fragment_definitions(&self, file_id: FileId) -> Vec<ApolloDiagnostic>;
+    #[salsa::invoke(fragment::validate_fragment_selection)]
+    fn validate_fragment_selection(&self, spread: FragmentSelection) -> Vec<ApolloDiagnostic>;
+
+    #[salsa::invoke(fragment::validate_fragment_spread)]
+    fn validate_fragment_spread(
+        &self,
+        spread: Arc<FragmentSpread>,
+        var_defs: Arc<Vec<VariableDefinition>>,
+    ) -> Vec<ApolloDiagnostic>;
+
+    #[salsa::invoke(fragment::validate_inline_fragment)]
+    fn validate_inline_fragment(
+        &self,
+        inline: Arc<InlineFragment>,
+        var_defs: Arc<Vec<VariableDefinition>>,
+    ) -> Vec<ApolloDiagnostic>;
+
+    #[salsa::invoke(fragment::validate_fragment_definition)]
+    #[salsa::transparent]
+    fn validate_fragment_definition(
+        &self,
+        def: Arc<FragmentDefinition>,
+        var_defs: Arc<Vec<VariableDefinition>>,
+    ) -> Vec<ApolloDiagnostic>;
+
+    #[salsa::invoke(fragment::validate_fragment_cycles)]
+    fn validate_fragment_cycles(&self, def: Arc<FragmentDefinition>) -> Vec<ApolloDiagnostic>;
+
+    #[salsa::invoke(fragment::validate_fragment_type_condition)]
+    fn validate_fragment_type_condition(
+        &self,
+        type_cond: Option<String>,
+        loc: HirNodeLocation,
+    ) -> Vec<ApolloDiagnostic>;
+
+    #[salsa::invoke(fragment::validate_fragment_used)]
+    fn validate_fragment_used(
+        &self,
+        def: Arc<FragmentDefinition>,
+        file_id: FileId,
+    ) -> Vec<ApolloDiagnostic>;
 
     #[salsa::invoke(selection::validate_selection_set)]
-    fn validate_selection_set(&self, sel_set: SelectionSet) -> Vec<ApolloDiagnostic>;
+    fn validate_selection_set(
+        &self,
+        sel_set: SelectionSet,
+        vars: Arc<Vec<VariableDefinition>>,
+    ) -> Vec<ApolloDiagnostic>;
 
     #[salsa::invoke(selection::validate_selection)]
-    fn validate_selection(&self, sel: Arc<Vec<Selection>>) -> Vec<ApolloDiagnostic>;
+    fn validate_selection(
+        &self,
+        sel: Arc<Vec<Selection>>,
+        vars: Arc<Vec<VariableDefinition>>,
+    ) -> Vec<ApolloDiagnostic>;
 
     #[salsa::invoke(variable::validate_variable_definitions)]
     fn validate_variable_definitions(&self, defs: Vec<VariableDefinition>)
@@ -185,6 +241,24 @@ pub trait ValidationDatabase:
 
     #[salsa::invoke(variable::validate_unused_variables)]
     fn validate_unused_variable(&self, op: Arc<OperationDefinition>) -> Vec<ApolloDiagnostic>;
+
+    #[salsa::transparent]
+    #[salsa::invoke(variable::validate_variable_usage)]
+    fn validate_variable_usage(
+        &self,
+        var_usage: InputValueDefinition,
+        var_defs: Arc<Vec<VariableDefinition>>,
+        arg: Argument,
+    ) -> Result<(), ApolloDiagnostic>;
+
+    #[salsa::transparent]
+    #[salsa::invoke(value::validate_values)]
+    fn validate_values(
+        &self,
+        ty: &Type,
+        arg: &Argument,
+        var_defs: Arc<Vec<VariableDefinition>>,
+    ) -> Result<(), Vec<ApolloDiagnostic>>;
 
     /// Check if two fields will output the same type.
     ///
@@ -366,8 +440,152 @@ pub fn validate_type_system(db: &dyn ValidationDatabase) -> Vec<ApolloDiagnostic
 pub fn validate_executable(db: &dyn ValidationDatabase, file_id: FileId) -> Vec<ApolloDiagnostic> {
     let mut diagnostics = Vec::new();
 
+    if db.source_type(file_id).is_executable() {
+        let document = db.ast(file_id).document();
+        for def in document.definitions() {
+            if !def.is_executable_definition() {
+                diagnostics.push(
+                    ApolloDiagnostic::new(
+                        db,
+                        (file_id, def.syntax().text_range()).into(),
+                        DiagnosticData::ExecutableDefinition { kind: def.kind() },
+                    )
+                    .label(Label::new(
+                        (file_id, def.syntax().text_range()),
+                        "not supported in executable documents",
+                    )),
+                );
+            }
+        }
+    }
+
     diagnostics.extend(db.validate_operation_definitions(file_id));
-    diagnostics.extend(db.validate_fragment_definitions(file_id));
+    for def in db.fragments(file_id).values() {
+        diagnostics.extend(db.validate_fragment_used(Arc::clone(def), file_id));
+    }
 
     diagnostics
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ApolloCompiler;
+
+    #[test]
+    fn executable_and_type_system_definitions() {
+        let input_type_system = r#"
+type Query {
+    name: String
+}
+"#;
+        let input_executable = r#"
+fragment q on Query { name }
+query {
+    ...q
+}
+"#;
+
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system(input_type_system, "schema.graphql");
+        compiler.add_executable(input_executable, "query.graphql");
+
+        let diagnostics = compiler.validate();
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn executable_definition_does_not_contain_type_system_definitions() {
+        let input_type_system = r#"
+type Query {
+    name: String
+}
+"#;
+        let input_executable = r#"
+type Object {
+    notAllowed: Boolean!
+}
+fragment q on Query { name }
+query {
+    ...q
+}
+"#;
+
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system(input_type_system, "schema.graphql");
+        compiler.add_executable(input_executable, "query.graphql");
+
+        let diagnostics = compiler.validate();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].data.to_string(),
+            "executable documents must not contain ObjectTypeDefinition"
+        );
+    }
+
+    #[test]
+    fn executable_definition_with_cycles_do_not_overflow_stack() {
+        let input_type_system = r#"
+type Query {
+    name: String
+}
+"#;
+
+        let input_executable = r#"
+{
+    ...q
+}
+fragment q on Query {
+    ...q
+}
+"#;
+
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system(input_type_system, "schema.graphql");
+        compiler.add_executable(input_executable, "query.graphql");
+
+        let diagnostics = compiler.validate();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].data.to_string(),
+            "`q` fragment cannot reference itself"
+        );
+    }
+
+    #[test]
+    fn executable_definition_with_nested_cycles_do_not_overflow_stack() {
+        let input_type_system = r#"
+type Query {
+    obj: TestObject
+}
+
+type TestObject {
+    name: String
+}
+"#;
+
+        let input_executable = r#"
+{
+    obj {
+        ...q
+    }
+}
+
+fragment q on TestObject {
+    ...q
+}
+"#;
+
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system(input_type_system, "schema.graphql");
+        compiler.add_executable(input_executable, "query.graphql");
+
+        let diagnostics = compiler.validate();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].data.to_string(),
+            "`q` fragment cannot reference itself"
+        );
+    }
 }

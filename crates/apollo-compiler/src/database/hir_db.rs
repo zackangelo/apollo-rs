@@ -171,6 +171,8 @@ pub trait HirDatabase: InputDatabase + AstDatabase {
     #[salsa::invoke(document::find_input_object_by_name)]
     fn find_input_object_by_name(&self, name: String) -> Option<Arc<InputObjectTypeDefinition>>;
 
+    /// Returns a map of type definitions in a GraphQL schema,
+    /// Where the key is the type name and the value is a `TypeDefinition` representing the type.
     #[salsa::invoke(document::types_definitions_by_name)]
     fn types_definitions_by_name(&self) -> Arc<IndexMap<String, TypeDefinition>>;
 
@@ -203,6 +205,13 @@ pub trait HirDatabase: InputDatabase + AstDatabase {
     /// Return all operation fragment spread fields in a corresponding selection set.
     #[salsa::invoke(document::operation_fragment_spread_fields)]
     fn operation_fragment_spread_fields(&self, selection_set: SelectionSet) -> Arc<Vec<Field>>;
+
+    /// Return all fragment definitions referenced in the operation.
+    #[salsa::invoke(document::operation_fragment_references)]
+    fn operation_fragment_references(
+        &self,
+        selection_set: SelectionSet,
+    ) -> Arc<Vec<Arc<FragmentDefinition>>>;
 
     /// Return the fields that `selection_set` selects including visiting fragments and inline fragments.
     #[salsa::invoke(document::flattened_operation_fields)]
@@ -1459,16 +1468,36 @@ fn value(val: ast::Value, file_id: FileId) -> Option<Value> {
             name: var.name()?.text().to_string(),
             loc: location(file_id, var.syntax()),
         }),
-        ast::Value::StringValue(string_val) => Value::String(string_val.into()),
+        ast::Value::StringValue(string_val) => Value::String {
+            loc: location(file_id, string_val.syntax()),
+            value: string_val.into(),
+        },
         // TODO(@goto-bus-stop) do not unwrap
-        ast::Value::FloatValue(float) => Value::Float(Float::new(float.try_into().unwrap())),
-        ast::Value::IntValue(int) => Value::Int(Float::new(f64::try_from(int).unwrap())),
-        ast::Value::BooleanValue(bool) => Value::Boolean(bool.try_into().unwrap()),
-        ast::Value::NullValue(_) => Value::Null,
-        ast::Value::EnumValue(enum_) => Value::Enum(name(enum_.name(), file_id)?),
+        ast::Value::FloatValue(float) => Value::Float {
+            loc: location(file_id, float.syntax()),
+            value: Float::new(float.try_into().unwrap()),
+        },
+        ast::Value::IntValue(int) => Value::Int {
+            loc: location(file_id, int.syntax()),
+            value: Float::new(f64::try_from(int).unwrap()),
+        },
+        ast::Value::BooleanValue(bool) => Value::Boolean {
+            loc: location(file_id, bool.syntax()),
+            value: bool.try_into().unwrap(),
+        },
+        ast::Value::NullValue(null) => Value::Null {
+            loc: location(file_id, null.syntax()),
+        },
+        ast::Value::EnumValue(enum_) => Value::Enum {
+            loc: location(file_id, enum_.syntax()),
+            value: name(enum_.name(), file_id)?,
+        },
         ast::Value::ListValue(list) => {
-            let list: Vec<Value> = list.values().filter_map(|v| value(v, file_id)).collect();
-            Value::List(list)
+            let li: Vec<Value> = list.values().filter_map(|v| value(v, file_id)).collect();
+            Value::List {
+                loc: location(file_id, list.syntax()),
+                value: li,
+            }
         }
         ast::Value::ObjectValue(object) => {
             let object_values: Vec<(Name, Value)> = object
@@ -1479,7 +1508,10 @@ fn value(val: ast::Value, file_id: FileId) -> Option<Value> {
                     Some((name, value))
                 })
                 .collect();
-            Value::Object(object_values)
+            Value::Object {
+                loc: location(file_id, object.syntax()),
+                value: object_values,
+            }
         }
     };
     Some(hir_val)
@@ -1515,7 +1547,7 @@ fn selection(
             field(db, sel_field, parent_obj_ty, file_id).map(Selection::Field)
         }
         ast::Selection::FragmentSpread(fragment) => {
-            fragment_spread(fragment, file_id).map(Selection::FragmentSpread)
+            fragment_spread(db, fragment, parent_obj_ty, file_id).map(Selection::FragmentSpread)
         }
         ast::Selection::InlineFragment(fragment) => Some(Selection::InlineFragment(
             inline_fragment(db, fragment, parent_obj_ty, file_id),
@@ -1534,25 +1566,31 @@ fn inline_fragment(
         Some(name_hir_node(tc, file_id))
     });
     let directives = directives(fragment.directives(), file_id);
-    let new_parent_obj = if let Some(type_condition) = type_condition.clone() {
-        Some(type_condition.src().to_string())
-    } else {
-        parent_obj
-    };
+    let new_parent_obj = type_condition
+        .clone()
+        .map_or_else(|| parent_obj.clone(), |tc| Some(tc.src().to_string()));
     let selection_set: SelectionSet =
         selection_set(db, fragment.selection_set(), new_parent_obj, file_id);
     let loc = location(file_id, fragment.syntax());
 
     let fragment_data = InlineFragment {
-        type_condition,
+        // for implicit inline fragments, the type condition is implied to be
+        // that of the current scope
+        type_condition: type_condition.or(parent_obj.clone().map(|o| Name { src: o, loc: None })),
         directives,
         selection_set,
+        parent_obj,
         loc,
     };
     Arc::new(fragment_data)
 }
 
-fn fragment_spread(fragment: ast::FragmentSpread, file_id: FileId) -> Option<Arc<FragmentSpread>> {
+fn fragment_spread(
+    _db: &dyn HirDatabase,
+    fragment: ast::FragmentSpread,
+    parent_obj: Option<String>,
+    file_id: FileId,
+) -> Option<Arc<FragmentSpread>> {
     let name = name(fragment.fragment_name()?.name(), file_id)?;
     let directives = directives(fragment.directives(), file_id);
     let loc = location(file_id, fragment.syntax());
@@ -1560,6 +1598,7 @@ fn fragment_spread(fragment: ast::FragmentSpread, file_id: FileId) -> Option<Arc
     let fragment_data = FragmentSpread {
         name,
         directives,
+        parent_obj,
         loc,
     };
     Some(Arc::new(fragment_data))
